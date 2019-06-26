@@ -958,7 +958,7 @@ class DisplacementField(torch.Tensor):
         """
         raise NotImplementedError
 
-    def linverse(self, *args, **kwargs):
+    def linverse(self):
         """Return a left inverse approximation for the displacement field
 
         Given a displacement field `f`, its left inverse is a displacement
@@ -968,7 +968,62 @@ class DisplacementField(torch.Tensor):
         In other words
         :math:`f_{inv} = \argmin_{g} |g(f)|^2`
         """
-        raise NotImplementedError
+        try:
+            u = self.identity_mapping()
+            ux = u.x.unsqueeze(-1).unsqueeze(-1)
+            uy = u.y.unsqueeze(-1).unsqueeze(-1)
+            u = None
+            mapping = self.mapping().unsqueeze(-4).unsqueeze(-4)
+            v00 = mapping[..., :-1, :-1]
+            v01 = mapping[..., :-1, 1:]
+            v10 = mapping[..., 1:, :-1]
+            v11 = mapping[..., 1:, 1:]
+            mapping = None
+
+            # quadratic coefficients
+            a = ((v00.x - v01.x) * (v00.y - v01.y - v10.y + v11.y)
+                 - (v00.x - v01.x - v10.x + v11.x) * (v00.y - v01.y))
+            b = ((ux - v00.x) * (v00.y - v01.y - v10.y + v11.y)
+                 + (v00.x - v01.x) * (-v00.y + v10.y)
+                 - (-v00.x + v10.x) * (v00.y - v01.y)
+                 - (v00.x - v01.x - v10.x + v11.x) * (uy - v00.y))
+            c = (ux - v00.x)*(-v00.y + v10.y) - (-v00.x + v10.x)*(uy - v00.y)
+            # quadratic formula solution
+            j_temp = (-b - (b.pow(2) - 4*a*c).sqrt()) / (2*a)
+            # corner case when a == 0
+            j_temp = j_temp.where(a != 0, -c / b)
+            a = b = c = None
+            # get i from j_temp
+            i = ((uy - v00.y + (v00.y - v01.y) * j_temp)
+                 / (-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp))
+            j_temp = None
+            # j has significantly smaller rounding error for near-trapezoids
+            j = ((ux - v00.x + (v00.x - v10.x) * i)
+                 / (-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i))
+            ux = uy = v00 = v01 = v10 = v11 = None
+
+            # negative of the bilinear interpolation
+            v00 = self[..., :-1, :-1].unsqueeze(-3).unsqueeze(-3)
+            v01 = self[..., :-1, 1:].unsqueeze(-3).unsqueeze(-3)
+            v10 = self[..., 1:, :-1].unsqueeze(-3).unsqueeze(-3)
+            v11 = self[..., 1:, 1:].unsqueeze(-3).unsqueeze(-3)
+            inv = -((1-i)*(1-j)*v00 + (1-i)*j*v01 + i*(1-j)*v10 + i*j*v11)
+            v00 = v01 = v10 = v11 = None
+
+            # average all vectors in the quadrilateral (selected by the mask)
+            mask = (i >= 0) & (i < 1) & (j >= 0) & (j < 1)
+            i = j = None
+            inv = inv.where(mask, torch.tensor(0.).to(inv)).sum(-1).sum(-1)
+            count = (mask).sum(-1).sum(-1).to(inv).max(torch.tensor(1).to(inv))
+            mask = None
+            return inv / count
+        except RuntimeError:
+            # In case this is an out-of-memory error, clear temporary tensors
+            self = u = ux = uy = mapping = None
+            a = b = c = j_temp = i = j = None
+            v00 = v01 = v10 = v11 = None
+            mask = inv = count = None
+            raise
 
     def rinverse(self, *args, **kwargs):
         """Return a right inverse approximation for the displacement field
@@ -999,7 +1054,8 @@ class DisplacementField(torch.Tensor):
         This is syntactic sugar for `inverse()`, and allows the symmetric
         inverse to be called as `~f` rather than `f.inverse()`.
         """
-        return self.inverse(*args, **kwargs)
+        # TODO: Implement symmetric inverse. Currently using left inverse.
+        return self.linverse(*args, **kwargs)
 
     # Adapting functions inherited from torch.Tensor
 
