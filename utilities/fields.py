@@ -993,19 +993,67 @@ class DisplacementField(torch.Tensor):
         In other words
         :math:`f_{inv} = \argmin_{g} |g(f)|^2`
         """
+        def tensor_min(*args):
+            minimum, *rest = args
+            for arg in rest:
+                minimum = minimum.min(arg)
+            return minimum
+
+        def tensor_max(*args):
+            maximum, *rest = args
+            for arg in rest:
+                maximum = maximum.max(arg)
+            return maximum
+
+        def fold(inp):
+            """Collapse the matrix at each pixel onto the local neighborhood"""
+            pad = (0, (inp.shape[2] + 1) % 2,  # last dimension
+                   0, (inp.shape[1] + 1) % 2)  # second to last dimension
+            res = F.pad(inp, pad)
+            res = F.fold(
+                res.view(1, res.shape[0]*res.shape[1]*res.shape[2], -1),
+                output_size=inp.shape[3:], kernel_size=inp.shape[1:3],
+                padding=((inp.shape[1])//2, (inp.shape[2])//2))
+            return res
+
         try:
-            u = self.identity_mapping()
-            ux = u.x.unsqueeze(-1).unsqueeze(-1)
-            uy = u.y.unsqueeze(-1).unsqueeze(-1)
-            u = None
-            mapping = self.mapping().unsqueeze(-4).unsqueeze(-4)
+            # vectors at the four corners of each pixel's quadrilateral
+            mapping = self.pixel_mapping()
             v00 = mapping[..., :-1, :-1]
             v01 = mapping[..., :-1, 1:]
             v10 = mapping[..., 1:, :-1]
             v11 = mapping[..., 1:, 1:]
-            mapping = None
+            mapping = None  # del mapping
 
-            # quadratic coefficients
+            with torch.no_grad():
+                # find each quadrilateral's (set of 4 vectors) span, in pixels
+                v_min = tensor_min(v00, v01, v10, v11).floor()
+                v_min.y.clamp_(0, self.shape[-2] - 1)
+                v_min.x.clamp_(0, self.shape[-1] - 1)
+                v_max = tensor_max(v00, v01, v10, v11).ceil()
+                v_max.y.clamp_(0, self.shape[-2] - 1)
+                v_max.x.clamp_(0, self.shape[-1] - 1)
+                # d_x and d_y are the largest spans in x and y
+                d = (v_max - v_min).max_vector().max(0)[0].int()
+                v_max = None  # del v_max
+                d_x, d_y = list(d.cpu().numpy())
+                d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
+                     .unsqueeze(-1).unsqueeze(-1)).to(v_min)
+                v_min.y.clamp_(0, self.shape[-2] - 1 - d_y)
+                v_min.x.clamp_(0, self.shape[-1] - 1 - d_x)
+                # u is an identity pixel mapping of a d_y by d_x neighborhood
+                u = self.identity().pixel_mapping()[..., :d_y, :d_x]
+                ux = u.x.unsqueeze(-1).unsqueeze(-1)
+                uy = u.y.unsqueeze(-1).unsqueeze(-1)
+                u = None  # del u
+
+            # subtract out v_min to bring all quadrilaterals near zero
+            v00 = (v00 - v_min).unsqueeze(-4).unsqueeze(-4)
+            v01 = (v01 - v_min).unsqueeze(-4).unsqueeze(-4)
+            v10 = (v10 - v_min).unsqueeze(-4).unsqueeze(-4)
+            v11 = (v11 - v_min).unsqueeze(-4).unsqueeze(-4)
+
+            # quadratic coefficients in gridsample solution `a*j^2+b*j+c=0`
             a = ((v00.x - v01.x) * (v00.y - v01.y - v10.y + v11.y)
                  - (v00.x - v01.x - v10.x + v11.x) * (v00.y - v01.y))
             b = ((ux - v00.x) * (v00.y - v01.y - v10.y + v11.y)
@@ -1013,41 +1061,57 @@ class DisplacementField(torch.Tensor):
                  - (-v00.x + v10.x) * (v00.y - v01.y)
                  - (v00.x - v01.x - v10.x + v11.x) * (uy - v00.y))
             c = (ux - v00.x)*(-v00.y + v10.y) - (-v00.x + v10.x)*(uy - v00.y)
-            # quadratic formula solution
+            # quadratic formula solution (note positive root is always invalid)
             j_temp = (-b - (b.pow(2) - 4*a*c).sqrt()) / (2*a)
-            # corner case when a == 0
+            # corner case when a == 0 (reduces to `b*j + c = 0`)
             j_temp = j_temp.where(a != 0, -c / b)
-            a = b = c = None
+            a = b = c = None  # del a, b, c
             # get i from j_temp
             i = ((uy - v00.y + (v00.y - v01.y) * j_temp)
                  / (-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp))
-            j_temp = None
+            j_temp = None  # del j_temp
             # j has significantly smaller rounding error for near-trapezoids
             j = ((ux - v00.x + (v00.x - v10.x) * i)
                  / (-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i))
-            ux = uy = v00 = v01 = v10 = v11 = None
+            ux = uy = None  # del ux, uy
+            v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
-            # negative of the bilinear interpolation
+            # negative of the bilinear interpolation to produce inverse vector
             v00 = self[..., :-1, :-1].unsqueeze(-3).unsqueeze(-3)
             v01 = self[..., :-1, 1:].unsqueeze(-3).unsqueeze(-3)
             v10 = self[..., 1:, :-1].unsqueeze(-3).unsqueeze(-3)
             v11 = self[..., 1:, 1:].unsqueeze(-3).unsqueeze(-3)
             inv = -((1-i)*(1-j)*v00 + (1-i)*j*v01 + i*(1-j)*v10 + i*j*v11)
-            v00 = v01 = v10 = v11 = None
+            v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
-            # average all vectors in the quadrilateral (selected by the mask)
+            # mask out inverse vectors at points outside the quadrilaterals
             mask = (i >= 0) & (i < 1) & (j >= 0) & (j < 1)
-            i = j = None
-            inv = inv.where(mask, torch.tensor(0.).to(inv)).sum(-1).sum(-1)
-            count = (mask).sum(-1).sum(-1).to(inv).max(torch.tensor(1).to(inv))
+            i = j = None  # del i, j
+            inv = inv.where(mask, torch.tensor(0.).to(inv))
+            # append mask to keep track of how many contributions to each pixel
+            inv = torch.cat((inv, mask.to(inv)), 1)
             mask = None
-            return inv / count
+
+            # indices at which to place each inverse vector in a sparse tensor
+            indices = ((v_min.unsqueeze(-3).unsqueeze(-3) + d)
+                       .view(2, -1).flip(0).round().long())
+            v_min = d = None
+            inv = inv.view(3, d_y, d_x, -1).permute(3, 0, 1, 2)
+            # construct sparse tensor and use `to_dense` to arrange vectors
+            inv = torch.cuda.sparse.FloatTensor(
+                indices, inv, (*self.shape[-2:], 3, d_y, d_x),
+                device=inv.device)
+            inv = inv.to_dense().permute(2, 3, 4, 0, 1)
+            # fold the d_y by d_x neighborhoods by summing the overlaps
+            inv = fold(inv)
+            # divide each pixel by number of contributions to get an average
+            return inv[:, :2] / inv[:, 2:].clamp(min=1.)
         except RuntimeError:
             # In case this is an out-of-memory error, clear temporary tensors
-            self = u = ux = uy = mapping = None
+            self = mapping = v_min = v_max = d = d_x = d_y = None
+            u = ux = uy = v00 = v01 = v10 = v11 = None
             a = b = c = j_temp = i = j = None
-            v00 = v01 = v10 = v11 = None
-            mask = inv = count = None
+            mask = inv = indices = None
             raise
 
     def rinverse(self, *args, **kwargs):
