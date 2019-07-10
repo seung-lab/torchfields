@@ -1101,7 +1101,8 @@ class DisplacementField(torch.Tensor):
             # quadratic formula solution (note positive root is always invalid)
             j_temp = (-b - (b.pow(2) - 4*a*c).sqrt()) / (2*a)
             # corner case when a == 0 (reduces to `b*j + c = 0`)
-            j_temp = j_temp.where(a != 0, -c / b)
+            eps = 2**(-51) if self.dtype is torch.double else 2**(-23)
+            j_temp = j_temp.where(a.abs() > eps, -c / b)
             a = b = c = None  # del a, b, c
             # get i from j_temp
             i = ((uy - v00.y + (v00.y - v01.y) * j_temp)
