@@ -983,7 +983,7 @@ class DisplacementField(torch.Tensor):
         """
         raise NotImplementedError
 
-    def linverse(self):
+    def linverse(self, autopad=True):
         """Return a left inverse approximation for the displacement field
 
         Given a displacement field `f`, its left inverse is a displacement
@@ -1016,9 +1016,46 @@ class DisplacementField(torch.Tensor):
                 padding=((inp.shape[1])//2, (inp.shape[2])//2))
             return res
 
+        def pad(inp):
+            """Pads the field just enough to reduce border effects"""
+            with torch.no_grad():
+                *_, H, W = inp.shape
+                mapping = inp.pixel_mapping()
+                pad_yl = mapping.y[..., 0, :].max().ceil().int().item()
+                pad_yh = (H-1-mapping.y[..., -1, :].min()).ceil().int().item()
+                pad_xl = mapping.x[..., :, 0].max().ceil().int().item()
+                pad_xh = (W-1-mapping.x[..., :, -1].min()).ceil().int().item()
+                pad_yl = max(pad_yl, 0) + 1
+                pad_yh = max(pad_yh, 0) + 1
+                pad_xl = max(pad_xl, 0) + 1
+                pad_xh = max(pad_xh, 0) + 1
+                # ensure that the new field is square newH = newW
+                newH, newW = pad_yl + H + pad_yh, pad_xl + W + pad_xh
+                if newH > newW:
+                    pad_xh += newH - newW
+                elif newW > newH:
+                    pad_yh += newW - newH
+                pad = (pad_xl, pad_xh, pad_yl, pad_yh)
+            return (F.pad(inp.pixels(), pad, mode='replicate').field()
+                    .from_pixels(), pad)
+
+        def unpad(inp, pad):
+            """Crops the field back to the original size"""
+            p_xl, p_xh, p_yl, p_yh = pad
+            p_xh = inp.shape[-1] - p_xh
+            p_yh = inp.shape[-2] - p_yh
+            return inp.pixels()[..., p_yl:p_yh, p_xl:p_xh].from_pixels()
+
         try:
+            # pad the field
+            if autopad:
+                field, padding = pad(self)
+            else:
+                field = self
+                padding = None
+
             # vectors at the four corners of each pixel's quadrilateral
-            mapping = self.pixel_mapping()
+            mapping = field.pixel_mapping()
             v00 = mapping[..., :-1, :-1]
             v01 = mapping[..., :-1, 1:]
             v10 = mapping[..., 1:, :-1]
@@ -1028,21 +1065,21 @@ class DisplacementField(torch.Tensor):
             with torch.no_grad():
                 # find each quadrilateral's (set of 4 vectors) span, in pixels
                 v_min = tensor_min(v00, v01, v10, v11).floor()
-                v_min.y.clamp_(0, self.shape[-2] - 1)
-                v_min.x.clamp_(0, self.shape[-1] - 1)
+                v_min.y.clamp_(0, field.shape[-2] - 1)
+                v_min.x.clamp_(0, field.shape[-1] - 1)
                 v_max = tensor_max(v00, v01, v10, v11).ceil()
-                v_max.y.clamp_(0, self.shape[-2] - 1)
-                v_max.x.clamp_(0, self.shape[-1] - 1)
+                v_max.y.clamp_(0, field.shape[-2] - 1)
+                v_max.x.clamp_(0, field.shape[-1] - 1)
                 # d_x and d_y are the largest spans in x and y
                 d = (v_max - v_min).max_vector().max(0)[0].int()
                 v_max = None  # del v_max
                 d_x, d_y = list(d.cpu().numpy())
                 d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
                      .unsqueeze(-1).unsqueeze(-1)).to(v_min)
-                v_min.y.clamp_(0, self.shape[-2] - 1 - d_y)
-                v_min.x.clamp_(0, self.shape[-1] - 1 - d_x)
+                v_min.y.clamp_(0, field.shape[-2] - 1 - d_y)
+                v_min.x.clamp_(0, field.shape[-1] - 1 - d_x)
                 # u is an identity pixel mapping of a d_y by d_x neighborhood
-                u = self.identity().pixel_mapping()[..., :d_y, :d_x]
+                u = field.identity().pixel_mapping()[..., :d_y, :d_x]
                 ux = u.x.unsqueeze(-1).unsqueeze(-1)
                 uy = u.y.unsqueeze(-1).unsqueeze(-1)
                 u = None  # del u
@@ -1077,10 +1114,10 @@ class DisplacementField(torch.Tensor):
             v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
             # negative of the bilinear interpolation to produce inverse vector
-            v00 = self[..., :-1, :-1].unsqueeze(-3).unsqueeze(-3)
-            v01 = self[..., :-1, 1:].unsqueeze(-3).unsqueeze(-3)
-            v10 = self[..., 1:, :-1].unsqueeze(-3).unsqueeze(-3)
-            v11 = self[..., 1:, 1:].unsqueeze(-3).unsqueeze(-3)
+            v00 = field[..., :-1, :-1].unsqueeze(-3).unsqueeze(-3)
+            v01 = field[..., :-1, 1:].unsqueeze(-3).unsqueeze(-3)
+            v10 = field[..., 1:, :-1].unsqueeze(-3).unsqueeze(-3)
+            v11 = field[..., 1:, 1:].unsqueeze(-3).unsqueeze(-3)
             inv = -((1-i)*(1-j)*v00 + (1-i)*j*v01 + i*(1-j)*v10 + i*j*v11)
             v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
@@ -1099,16 +1136,21 @@ class DisplacementField(torch.Tensor):
             inv = inv.view(3, d_y, d_x, -1).permute(3, 0, 1, 2)
             # construct sparse tensor and use `to_dense` to arrange vectors
             inv = torch.cuda.sparse.FloatTensor(
-                indices, inv, (*self.shape[-2:], 3, d_y, d_x),
+                indices, inv, (*field.shape[-2:], 3, d_y, d_x),
                 device=inv.device)
             inv = inv.to_dense().permute(2, 3, 4, 0, 1)
             # fold the d_y by d_x neighborhoods by summing the overlaps
             inv = fold(inv)
             # divide each pixel by number of contributions to get an average
-            return inv[:, :2] / inv[:, 2:].clamp(min=1.)
+            inv = inv[:, :2] / inv[:, 2:].clamp(min=1.)
+
+            # crop back to original shape
+            if autopad:
+                inv = unpad(inv.field(), padding)
+            return inv
         except RuntimeError:
             # In case this is an out-of-memory error, clear temporary tensors
-            self = mapping = v_min = v_max = d = d_x = d_y = None
+            self = field = pad = mapping = v_min = v_max = d = d_x = d_y = None
             u = ux = uy = v00 = v01 = v10 = v11 = None
             a = b = c = j_temp = i = j = None
             mask = inv = indices = None
