@@ -598,6 +598,31 @@ class DisplacementField(torch.Tensor):
         else:
             return self.mean(-1).mean(-1)
 
+    def mean_finite_vector(self, keepdim=False):
+        """Compute the mean displacement vector of the finite elements in
+        each field in a batch
+
+        Args:
+            self: DisplacementFields of shape `(N, 2, H, W)`
+            keepdim: if `True`, retains the spatial dimensions in the output
+
+        Returns:
+            `torch.Tensor` of shape `(N, 2)` or `DisplacementField` of shape
+            `(N, 2, 1, 1)` if `keepdim` is `True`, containing the mean finite
+            vector of each field
+        """
+        mask = torch.isfinite(self).all(-3, keepdim=True)
+        self = self.where(mask, torch.tensor(0).to(self))
+        if keepdim:
+            sum = self.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
+        else:
+            sum = self.sum(-1).sum(-1)
+        count = mask.sum(-1).sum(-1)
+        if count == 0:
+            return sum
+        else:
+            return sum / count.float()
+
     def mean_nonzero_vector(self, keepdim=False):
         """Compute the mean displacement vector of the nonzero elements in
         each field in a batch
