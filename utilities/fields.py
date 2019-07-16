@@ -993,6 +993,9 @@ class DisplacementField(torch.Tensor):
         In other words
         :math:`f_{inv} = \argmin_{g} |g(f)|^2`
         """
+        # tolarance for point containment in a quadrilateral
+        gamma = 2**-16
+
         def tensor_min(*args):
             minimum, *rest = args
             for arg in rest:
@@ -1046,6 +1049,39 @@ class DisplacementField(torch.Tensor):
             p_yh = inp.shape[-2] - p_yh
             return inp.pixels()[..., p_yl:p_yh, p_xl:p_xh].from_pixels()
 
+        @torch.no_grad()
+        def winding_number(Px, Py, v00, v01, v10, v11):
+            """Gives the winding number of a quadrilateral around a grid point
+            When the winding number is non-zero, the quadrilateral contains
+            the grid point. More specifically, only positive winding numbers
+            are relevant in this context, since inverted quadrilaterals are
+            not considered.
+            For edge cases, this is a more accurate measure than checking
+            whether i and j fall within the range [0,1).
+            Based on http://geomalgorithms.com/a03-_inclusion.html
+            """
+            try:
+                # vertices in counterclockwise order (viewing y as up)
+                V = torch.stack([v00, v01, v11, v10, v00], dim=0).field_()
+                v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
+                # initial and final vertex for each edge
+                Vi, Vf = V[:-1], V[1:]
+                V = None  # del V
+                # sign of cross product indicates direction around grid point
+                cross = ((Vf.x - Vi.x)*(Py - Vi.y) - (Px - Vi.x)*(Vf.y - Vi.y))
+                # upward crossing of rightward ray from grid point
+                upward = (Vi.y <= Py) & (Vf.y > Py) & (cross > -gamma)
+                # downward crossing of rightward ray from grid point
+                downward = (Vi.y > Py) & (Vf.y <= Py) & (cross < -gamma)
+                Vi = Vf = Px = Py = cross = None  # del Vi, Vf, Px, Py, cross
+                # winding number = diff between number of up and down crossings
+                return (upward.int() - downward.int()).sum(dim=0)
+            except RuntimeError:
+                # In case this is an out-of-memory error, clear temp tensors
+                v00 = v01 = v10 = v11 = Px = Py = None
+                V = Vi = Vf = cross = upward = downward = None
+                raise
+
         try:
             # pad the field
             if autopad:
@@ -1079,7 +1115,7 @@ class DisplacementField(torch.Tensor):
                 v_min.y.clamp_(0, field.shape[-2] - 1 - d_y)
                 v_min.x.clamp_(0, field.shape[-1] - 1 - d_x)
                 # u is an identity pixel mapping of a d_y by d_x neighborhood
-                u = field.identity().pixel_mapping()[..., :d_y, :d_x]
+                u = field.identity().pixel_mapping()[..., :d_y, :d_x].round()
                 ux = u.x.unsqueeze(-1).unsqueeze(-1)
                 uy = u.y.unsqueeze(-1).unsqueeze(-1)
                 u = None  # del u
@@ -1111,6 +1147,8 @@ class DisplacementField(torch.Tensor):
             # j has significantly smaller rounding error for near-trapezoids
             j = ((ux - v00.x + (v00.x - v10.x) * i)
                  / (-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i))
+            # winding_number > 0 means point is contained in the quadrilateral
+            wn = winding_number(ux, uy, v00, v01, v10, v11)
             ux = uy = None  # del ux, uy
             v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
@@ -1123,8 +1161,8 @@ class DisplacementField(torch.Tensor):
             v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
 
             # mask out inverse vectors at points outside the quadrilaterals
-            mask = (i >= 0) & (i < 1) & (j >= 0) & (j < 1)
-            i = j = None  # del i, j
+            mask = (wn > 0) & torch.isfinite(i) & torch.isfinite(j)
+            i = j = wn = None  # del i, j, wn
             inv = inv.where(mask, torch.tensor(0.).to(inv))
             # append mask to keep track of how many contributions to each pixel
             inv = torch.cat((inv, mask.to(inv)), 1)
@@ -1152,7 +1190,7 @@ class DisplacementField(torch.Tensor):
         except RuntimeError:
             # In case this is an out-of-memory error, clear temporary tensors
             self = field = pad = mapping = v_min = v_max = d = d_x = d_y = None
-            u = ux = uy = v00 = v01 = v10 = v11 = None
+            u = ux = uy = v00 = v01 = v10 = v11 = wn = None
             a = b = c = j_temp = i = j = None
             mask = inv = indices = None
             raise
