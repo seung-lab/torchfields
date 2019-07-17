@@ -993,8 +993,12 @@ class DisplacementField(torch.Tensor):
         In other words
         :math:`f_{inv} = \argmin_{g} |g(f)|^2`
         """
+        # comparison to 0
+        eps1 = 2**(-51) if self.dtype is torch.double else 2**(-23)
+        # denominator fudge factor to avoid dividing by 0
+        eps2 = eps1 * 2**(-10)
         # tolarance for point containment in a quadrilateral
-        gamma = 2**-16
+        eps3 = 2**-16
 
         def tensor_min(*args):
             minimum, *rest = args
@@ -1070,9 +1074,9 @@ class DisplacementField(torch.Tensor):
                 # sign of cross product indicates direction around grid point
                 cross = ((Vf.x - Vi.x)*(Py - Vi.y) - (Px - Vi.x)*(Vf.y - Vi.y))
                 # upward crossing of rightward ray from grid point
-                upward = (Vi.y <= Py) & (Vf.y > Py) & (cross > -gamma)
+                upward = (Vi.y <= Py) & (Vf.y > Py) & (cross > -eps3)
                 # downward crossing of rightward ray from grid point
-                downward = (Vi.y > Py) & (Vf.y <= Py) & (cross < -gamma)
+                downward = (Vi.y > Py) & (Vf.y <= Py) & (cross < -eps3)
                 Vi = Vf = Px = Py = cross = None  # del Vi, Vf, Px, Py, cross
                 # winding number = diff between number of up and down crossings
                 return (upward.int() - downward.int()).sum(dim=0)
@@ -1135,18 +1139,20 @@ class DisplacementField(torch.Tensor):
                  - (v00.x - v01.x - v10.x + v11.x) * (uy - v00.y))
             c = (ux - v00.x)*(-v00.y + v10.y) - (-v00.x + v10.x)*(uy - v00.y)
             # quadratic formula solution (note positive root is always invalid)
-            j_temp = (-b - (b.pow(2) - 4*a*c).sqrt()) / (2*a)
+            j_temp = ((b + (b.pow(2) - 4*a*c).clamp(min=eps2).sqrt()).abs()
+                      / ((2*a).abs() + eps2))
             # corner case when a == 0 (reduces to `b*j + c = 0`)
-            eps = 2**(-51) if self.dtype is torch.double else 2**(-23)
-            j_temp = j_temp.where(a.abs() > eps, -c / b)
+            j_temp = j_temp.where(a.abs() > eps1, -c / b)
             a = b = c = None  # del a, b, c
             # get i from j_temp
-            i = ((uy - v00.y + (v00.y - v01.y) * j_temp)
-                 / (-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp))
+            i = ((uy - v00.y + (v00.y - v01.y) * j_temp).abs()
+                 / ((-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp)
+                    .abs() + eps2))
             j_temp = None  # del j_temp
             # j has significantly smaller rounding error for near-trapezoids
-            j = ((ux - v00.x + (v00.x - v10.x) * i)
-                 / (-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i))
+            j = ((ux - v00.x + (v00.x - v10.x) * i).abs()
+                 / ((-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i)
+                    .abs() + eps2))
             # winding_number > 0 means point is contained in the quadrilateral
             wn = winding_number(ux, uy, v00, v01, v10, v11)
             ux = uy = None  # del ux, uy
