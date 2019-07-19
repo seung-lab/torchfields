@@ -3,9 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from itertools import combinations
 from functools import wraps
-from utilities.helpers import GaussianSmoothing
 
 
 #############################################
@@ -267,7 +265,7 @@ class DisplacementField(torch.Tensor):
     # Constuctors for typical displacent fields
 
     def identity(*args, **kwargs):
-        """Returns an identity displacent field (containing all zero vectors).
+        """Returns an identity displacement field (containing all zero vectors)
 
         See :func:`torch.zeros`
         """
@@ -453,7 +451,7 @@ class DisplacementField(torch.Tensor):
         """Returns a displacement field for an affine transform within a bbox
 
         Args:
-            aff: 2x3 ndarray or torch.Tensor. The affine matrix defining the 
+            aff: 2x3 ndarray or torch.Tensor. The affine matrix defining the
                 affine transform
             offset: tuple with (x-offset, y-offset)
             size: an `int`, a `tuple` or a `torch.Size` of the form
@@ -537,7 +535,7 @@ class DisplacementField(torch.Tensor):
                 do_something()
 
         since `df.is_identity()` is equivalent to `not df`.
-        """  # TODO: allow a bound on the magnitude (|f|^2 < gamma)
+        """
         if eps is None and magn_eps is None:
             return (self == 0.).all()
         else:
@@ -545,7 +543,7 @@ class DisplacementField(torch.Tensor):
             if eps is not None:
                 is_id = is_id and (self >= -eps).all() and (self <= eps).all()
             if magn_eps is not None:
-                is_id = is_id and self.magnitude(keepdim=True) <= magn_eps
+                is_id = is_id and (self.magnitude(True) <= magn_eps).all()
             return is_id
 
     def __bool__(self):
@@ -615,13 +613,11 @@ class DisplacementField(torch.Tensor):
         self = self.where(mask, torch.tensor(0).to(self))
         if keepdim:
             sum = self.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
+            count = mask.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
         else:
             sum = self.sum(-1).sum(-1)
-        count = mask.sum(-1).sum(-1)
-        if count == 0:
-            return sum
-        else:
-            return sum / count.float()
+            count = mask.sum(-1).sum(-1)
+        return sum / count.clamp(min=1).float()
 
     def mean_nonzero_vector(self, keepdim=False):
         """Compute the mean displacement vector of the nonzero elements in
@@ -640,15 +636,14 @@ class DisplacementField(torch.Tensor):
             `(N, 2, 1, 1)` if `keepdim` is `True`, containing the mean nonzero
             vector of each field
         """
+        mask = (self.magnitude(keepdim=True) > 0)
         if keepdim:
             sum = self.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
+            count = mask.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
         else:
             sum = self.sum(-1).sum(-1)
-        count = (self.magnitude() > 0).sum(-1).sum(-1)
-        if count == 0:
-            return sum
-        else:
-            return sum / count.float()
+            count = mask.sum(-1).sum(-1)
+        return sum / count.clamp(min=1).float()
 
     def min_vector(self, keepdim=False):
         """Compute the minimum displacement vector of each field in a batch
@@ -791,7 +786,11 @@ class DisplacementField(torch.Tensor):
             a `DisplacementField` type tensor containing the same field
             represented as a pixel mapping
         """
-        return (self.mapping() + 1).pixels(size) - .5
+        if size is None:
+            size = self.shape
+        if isinstance(size, tuple):
+            size = size[-1]
+        return self.mapping().pixels(size) + (size - 1)/2
 
     def from_pixel_mapping(self, size=None):
         """Convert a mapping to a displacement field which contains the
@@ -809,7 +808,11 @@ class DisplacementField(torch.Tensor):
             a `DisplacementField` containing the pixel mapping represented
             as a displacement field
         """
-        return ((self + .5).from_pixels(size) - 1).from_mapping()
+        if size is None:
+            size = self.shape
+        if isinstance(size, tuple):
+            size = size[-1]
+        return (self - (size - 1)/2).from_pixels(size).from_mapping()
 
     # Aliases for the components of the displacent vectors
 
@@ -981,8 +984,29 @@ class DisplacementField(torch.Tensor):
         only able to accept 2-dimensional tensors, and a `DisplacementField`
         is always at least 3-dimensional (2 spatial + 1 component dimension).
         """
-        raise NotImplementedError
+        # TODO: Implement symmetric inverse. Currently using left inverse.
+        return self.linverse(*args, **kwargs)
 
+    def __invert__(self, *args, **kwargs):
+        """Return a symmetric inverse approximation for the displacement field
+
+        Given a displacement field `f`, its symmetric inverse is a displacement
+        field `f_inv` such that
+        `f(f_inv) ~= identity ~= f_inv(f)`
+
+        In other words
+        :math:`f_{inv} = \argmin_{g} |f(g)|^2 + |g(f)|^2`
+
+        Note that this is an approximation for the symmetric inverse.
+        In cases for which only one inverse direction is desired, a better
+        approximation can be achieved using `linverse()` and `rinverse()`.
+
+        This is syntactic sugar for `inverse()`, and allows the symmetric
+        inverse to be called as `~f` rather than `f.inverse()`.
+        """
+        return self.inverse(*args, **kwargs)
+
+    @ensure_dimensions(ndimensions=4, arg_indices=(0), reverse=True)
     def linverse(self, autopad=True):
         """Return a left inverse approximation for the displacement field
 
@@ -993,6 +1017,12 @@ class DisplacementField(torch.Tensor):
         In other words
         :math:`f_{inv} = \argmin_{g} |g(f)|^2`
         """
+        if len(self.shape) != 4 or self.shape[0] > 1:
+            raise NotImplementedError('Left inverse is currently implemented '
+                                      'only for single-batch fields. '
+                                      'Received batch size {}'
+                                      .format(','.join(
+                                          str(n) for n in self.shape[:-3])))
         # comparison to 0
         eps1 = 2**(-51) if self.dtype is torch.double else 2**(-23)
         # denominator fudge factor to avoid dividing by 0
@@ -1001,30 +1031,21 @@ class DisplacementField(torch.Tensor):
         eps3 = 2**-16
 
         def tensor_min(*args):
+            """Elementwise minimum of a sequence of tensors"""
             minimum, *rest = args
             for arg in rest:
                 minimum = minimum.min(arg)
             return minimum
 
         def tensor_max(*args):
+            """Elementwise maximum of a sequence of tensors"""
             maximum, *rest = args
             for arg in rest:
                 maximum = maximum.max(arg)
             return maximum
 
-        def fold(inp):
-            """Collapse the matrix at each pixel onto the local neighborhood"""
-            pad = (0, (inp.shape[2] + 1) % 2,  # last dimension
-                   0, (inp.shape[1] + 1) % 2)  # second to last dimension
-            res = F.pad(inp, pad)
-            res = F.fold(
-                res.view(1, res.shape[0]*res.shape[1]*res.shape[2], -1),
-                output_size=inp.shape[3:], kernel_size=inp.shape[1:3],
-                padding=((inp.shape[1])//2, (inp.shape[2])//2))
-            return res
-
         def pad(inp):
-            """Pads the field just enough to reduce border effects"""
+            """Pads the field just enough to eliminate border effects"""
             with torch.no_grad():
                 *_, H, W = inp.shape
                 mapping = inp.pixel_mapping()
@@ -1036,22 +1057,46 @@ class DisplacementField(torch.Tensor):
                 pad_yh = max(pad_yh, 0) + 1
                 pad_xl = max(pad_xl, 0) + 1
                 pad_xh = max(pad_xh, 0) + 1
-                # ensure that the new field is square newH = newW
+                # ensure that the new field is square (that is, newH = newW)
                 newH, newW = pad_yl + H + pad_yh, pad_xl + W + pad_xh
                 if newH > newW:
                     pad_xh += newH - newW
                 elif newW > newH:
                     pad_yh += newW - newH
-                pad = (pad_xl, pad_xh, pad_yl, pad_yh)
-            return (F.pad(inp.pixels(), pad, mode='replicate').field()
-                    .from_pixels(), pad)
+                padding = (pad_xl, pad_xh, pad_yl, pad_yh)
+            return (F.pad(inp.pixels(), padding, mode='replicate').field()
+                    .from_pixels(), padding)
 
-        def unpad(inp, pad):
-            """Crops the field back to the original size"""
-            p_xl, p_xh, p_yl, p_yh = pad
+        def unpad(inp, padding):
+            """Crops the field back to its original size"""
+            p_xl, p_xh, p_yl, p_yh = padding
             p_xh = inp.shape[-1] - p_xh
             p_yh = inp.shape[-2] - p_yh
             return inp.pixels()[..., p_yl:p_yh, p_xl:p_xh].from_pixels()
+
+        def fold(inp):
+            """Collapse the matrix at each pixel onto the local neighborhood
+
+            The input to this function is a spatial tensor in which the
+            entry contained in every spatial pixel is itself a small matrix.
+            The values of this matrix correspond to the neighborhood of that
+            pixel. For instance, the value at the center of the matrix
+            corresponds to the pixel itself, whereas the value above and to
+            the left of the center corresponds to the pixel's upper left
+            neighbor, and so on.
+
+            This function collapses this into a spatial tensor with scalar
+            values by summing the respective values corresponding to each
+            pixel.
+            """
+            pad = (0, (inp.shape[2] + 1) % 2,  # last dimension
+                   0, (inp.shape[1] + 1) % 2)  # second to last dimension
+            res = F.pad(inp, pad)
+            res = F.fold(
+                res.view(1, res.shape[0]*res.shape[1]*res.shape[2], -1),
+                output_size=inp.shape[3:], kernel_size=inp.shape[1:3],
+                padding=((inp.shape[1])//2, (inp.shape[2])//2))
+            return res
 
         @torch.no_grad()
         def winding_number(Px, Py, v00, v01, v10, v11):
@@ -1213,26 +1258,6 @@ class DisplacementField(torch.Tensor):
         """
         raise NotImplementedError
 
-    def __invert__(self, *args, **kwargs):
-        """Return a symmetric inverse approximation for the displacement field
-
-        Given a displacement field `f`, its symmetric inverse is a displacement
-        field `f_inv` such that
-        `f(f_inv) ~= identity ~= f_inv(f)`
-
-        In other words
-        :math:`f_{inv} = \argmin_{g} |f(g)|^2 + |g(f)|^2`
-
-        Note that this is an approximation for the symmetric inverse.
-        In cases for which only one inverse direction is desired, a better
-        approximation can be achieved using `linverse()` and `rinverse()`.
-
-        This is syntactic sugar for `inverse()`, and allows the symmetric
-        inverse to be called as `~f` rather than `f.inverse()`.
-        """
-        # TODO: Implement symmetric inverse. Currently using left inverse.
-        return self.linverse(*args, **kwargs)
-
     # Adapting functions inherited from torch.Tensor
 
     @permute_output
@@ -1254,26 +1279,39 @@ class DisplacementField(torch.Tensor):
     def irfft(self, *args, **kwargs):
         return super(type(self), self).irfft(*args, **kwargs)
 
+    def __rpow__(self, other):
+        # defined explicitly since pytorch default gives infinite recursion
+        return self.new_tensor(other).__pow__(self)
+
     # Vector Voting
 
     def gaussian_blur(self, sigma=1, kernel_size=5):
         """Gausssian blur the displacement field to reduce any unsmoothness
+        Adapted from https://bit.ly/2JO7CCP
         """
+        import math
+        if sigma == 0:
+            return self.clone()
         pad = (kernel_size - 1) // 2
         if kernel_size % 2 == 0:
             pad = (pad, pad+1, pad, pad+1)
         else:
             pad = (pad,)*4
-        smoothing = GaussianSmoothing(channels=2, kernel_size=kernel_size,
-                                      sigma=sigma, device=self.device)
-        return smoothing(F.pad(self, pad, mode='reflect'))
+        padded = F.pad(self, pad, mode='reflect')
+        mu = (kernel_size - 1) / 2
+        x = torch.stack(torch.meshgrid([torch.arange(kernel_size).to(self)]*2))
+        kernel = torch.exp((-((x - mu) / sigma) ** 2) / 2)
+        kernel = kernel.prod(dim=0) / (2 * math.pi * sigma**2)
+        kernel = kernel / kernel.sum()  # renormalize to get unit product
+        kernel = kernel.expand(2, 1, *kernel.shape)
+        return F.conv2d(padded, weight=kernel, groups=2)
 
     def vote(self, softmin_temp=1, blur_sigma=1):
-        """Produce a single, consensus displacement field from a set of
+        """Produce a single, consensus displacement field from a batch of
         displacement fields
 
         The resulting displacement field represents displacements that are
-        closest to the most constent majority of the fields.
+        closest to the most consistent majority of the fields.
         This effectively allows the fields to differentiably vote on the
         displacement that is most likely to be correct.
 
@@ -1281,22 +1319,24 @@ class DisplacementField(torch.Tensor):
             self: DisplacementField of shape (N, 2, H, W)
             softmin_temp (float): temperature of softmin to use
             blur_sigma (float): std dev of the Gaussian kernel by which to blur
-                the inputs; None means no blurring
+                the softmin inputs. Note that the outputs are not blurred.
+                None or 0 means no blurring.
 
         Returns:
             DisplacementField of shape (1, 2, H, W) containing the vector
             voting result
         """
+        from itertools import combinations
         if self.ndimension() != 4:
-            raise ValueError('Vector voting only implemented on displacement '
-                             'fields with 4 dimensions. The input has {}.'
-                             .format(self.ndimension()))
-        n, two, *shape = self.shape
-        if n % 2 == 0:
+            raise ValueError('Vector voting is only implemented on '
+                             'displacement fields with 4 dimensions. '
+                             'The input has {}.'.format(self.ndimension()))
+        n, _two_, *shape = self.shape
+        if n == 1:
+            return self
+        elif n % 2 == 0:
             raise ValueError('Cannot vetor vote on an even number of '
                              'displacement fields: {}'.format(n))
-        elif n == 1:
-            return self
         m = (n + 1) // 2  # smallest number that constututes a majority
         blurred = self.gaussian_blur(sigma=blur_sigma) if blur_sigma else self
 
@@ -1331,25 +1371,3 @@ class DisplacementField(torch.Tensor):
 
 
 torch.Field = DisplacementField
-
-######################
-# possible TODO list #
-######################
-
-"""BUG: 2 ** disp_field --> RecursionError
-"""
-
-"""State variables
-- Direction convention: Euler/Lagrange (aka Push/Pull) conventions
-- Scale convention: [-1,1], [0, 1], [0, size], [-0.5, size-0.5]
-- Identity convention: Mapping vs. Displacement (with / without identity)
-- Dimension order: (B, C, [Z], Y, X), (B, C, X, Y, [Z]),
-                   (B, [Z], Y, X, C), (B, X, Y, Z, C)
-                   B = Batch numbers, C = Component
-- Component order: XYZ or ZYX
-
-Functions for conversion between states
-"""
-
-"""Unit testing
-"""
