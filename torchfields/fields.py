@@ -1368,6 +1368,3 @@ class DisplacementField(torch.Tensor):
         field_weights = field_weights / field_weights.sum(dim=0, keepdim=True)
 
         return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
-
-
-torch.Field = DisplacementField
