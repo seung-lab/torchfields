@@ -1225,9 +1225,10 @@ class DisplacementField(torch.Tensor):
             v_min = d = None
             inv = inv.view(3, d_y, d_x, -1).permute(3, 0, 1, 2)
             # construct sparse tensor and use `to_dense` to arrange vectors
-            inv = torch.cuda.sparse.FloatTensor(
-                indices, inv, (*field.shape[-2:], 3, d_y, d_x),
-                device=inv.device)
+            SparseTensor = (torch.cuda.sparse.FloatTensor if self.is_cuda
+                            else torch.sparse.FloatTensor)
+            inv = SparseTensor(indices, inv, (*field.shape[-2:], 3, d_y, d_x),
+                               device=inv.device)
             inv = inv.to_dense().permute(2, 3, 4, 0, 1)
             # fold the d_y by d_x neighborhoods by summing the overlaps
             inv = fold(inv)
