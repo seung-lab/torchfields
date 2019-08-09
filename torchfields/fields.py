@@ -335,17 +335,21 @@ class DisplacementField(torch.Tensor):
         return field.requires_grad_(rand_tensor.requires_grad)
     rand_in_bounds_like = rand_in_bounds
 
-    def _get_parameters(tensor, size, device, dtype):
+    def _get_parameters(tensor, size=None, device=None, dtype=None,
+                        override=False):
         """Auxiliary function to deduce the right set of parameters to a tensor
         function.
         In particular, if `tensor` is a `torch.Tensor`, it uses those values.
         Otherwise, if the values are not explicitly specified, returns the
-        default values
+        default values.
+        If `override` is set to `True`, then the parameters passed override
+        those of the tensor unless they are None.
         """
         if isinstance(tensor, torch.Tensor):
-            size = tensor.shape
-            device = tensor.device
-            dtype = tensor.dtype
+            size = size if override and (size is not None) else tensor.shape
+            device = (device if override and (device is not None)
+                      else tensor.device)
+            dtype = dtype if override and (dtype is not None) else tensor.dtype
         else:
             if device is None:
                 try:
@@ -382,7 +386,10 @@ class DisplacementField(torch.Tensor):
             'batch_dim': batch_dim,
             'device': device,
             'dtype': dtype,
-            'tensor_type': tensor_types['cpu' in str(device), dtype]
+            'tensor_type': tensor_types[
+                'cpu' in str(device),
+                dtype if dtype in [torch.double, torch.float] else torch.float
+            ]
         }
 
     @torch.no_grad()
@@ -473,7 +480,8 @@ class DisplacementField(torch.Tensor):
             define the location in the source image that contribute to a pixel
             in the destination image.
         """
-        params = DisplacementField._get_parameters(aff, size, device, dtype)
+        params = DisplacementField._get_parameters(aff, size, device, dtype,
+                                                   override=True)
         device, dtype, tensor_type = \
             [params[key] for key in ('device', 'dtype', 'tensor_type')]
         if not isinstance(size, tuple):
@@ -484,22 +492,39 @@ class DisplacementField(torch.Tensor):
                                 "'torch.Size'. Received '{}'"
                                 .format(type(size).__qualname__))
         if isinstance(aff, list):
-            A = tensor_type(aff + [[0, 0, 1]], device=device)
+            aff = tensor_type(aff, device=device)
+        if aff.ndim == 2:
+            aff.unsqueeze_(0)
+            N = 1
+        elif aff.ndim == 3:
+            N = aff.shape[0]
         else:
-            A = torch.cat([aff, tensor_type([[0, 0, 1]], device=device)])
-        B = tensor_type([[1., 0, offset[0]],
-                         [0, 1., offset[1]],
-                         [0, 0, 1]], device=device)
-        Bi = tensor_type([[1., 0, -offset[0]],
-                          [0, 1., -offset[1]],
-                          [0, 0, 1]], device=device)
-        theta = torch.mm(Bi, torch.mm(A, B))[:2].unsqueeze(0)
-        M = F.affine_grid(theta, size)
+            raise ValueError("Expected 2 or 3-dimensional affine matrix. "
+                             "Received shape {}.".format(aff.shape))
+        if offset[0] != 0 or offset[1] != 0:
+            z = tensor_type([[0., 0., 1.]], device=device)
+            z = z.expand(N, *z.shape)
+            A = torch.cat([aff, z], 1)
+            B = tensor_type([[1., 0., offset[0]],
+                             [0., 1., offset[1]],
+                             [0., 0., 1.]], device=device)
+            B = B.expand(N, *B.shape)
+            Bi = tensor_type([[1., 0., -offset[0]],
+                              [0., 1., -offset[1]],
+                              [0., 0., 1.]], device=device)
+            Bi = Bi.expand(N, *Bi.shape)
+            aff = torch.mm(Bi, torch.mm(A, B))[:, :2]
+        if size[-2] > 1:
+            # rescale the offset to PyTorch conventions
+            aff = torch.cat([aff[..., :2],
+                             aff[..., 2:] * (size[-2] / (size[-2] - 1))], -1)
+        M = F.affine_grid(aff, size)
         # Id is an identity mapping without the overhead of `identity_mapping`
-        id_theta = tensor_type([[[1, 0, 0], [0, 1, 0]]], device=device)
-        Id = F.affine_grid(id_theta, size)
-        M -= Id
-        M *= (size[-2] - 1) / size[-2]  # rescale the grid provided by PyTorch
+        id_aff = tensor_type([[1, 0, 0], [0, 1, 0]], device=device)
+        id_aff = id_aff.expand(N, *id_aff.shape)
+        Id = F.affine_grid(id_aff, size)
+        M = M - Id
+        M = M * ((size[-2] - 1) / size[-2])  # rescale the grid from by PyTorch
         M = M.permute(0, 3, 1, 2)  # move the components to 2nd position
         return M
 
