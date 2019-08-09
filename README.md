@@ -41,7 +41,7 @@ This is often referred to as the **Eulerian** or **pull** convention, since the 
 This is achieved by calling the `sample()` function (which in fact wraps PyTorch's built-in `grid_sample()`, while converting the conventions as necessary).
 
 An alternative way to warp an image by a displacement field is by sending each pixel of the image along the corresponding displacement vector to its new location. This is referred to as the **Lagrangian** or **push** convention, since the vectors of the field indicate where an image pixel should be *pushed* to. This direction, while seemingly intuitive, is much less straight-forward to implement, since there is no definitive way to handle the discretization (for instance, what to do when the destinations are not whole pixel coordinates, when two sources map to the same destination, and when nothing maps into a destination pixel).
-The solution for warping in the Lagrangian direction is to **first invert the field**, and then warp the image normally using `sample()`.
+The solution for warping in the Lagrangian direction is to **first invert the field** using `inverse()`, and then warp the image normally using `sample()`.
 
 *To read more about the two ways to describe flow fields, see the [Wikipedia article](https://en.wikipedia.org/wiki/Lagrangian_and_Eulerian_specification_of_the_flow_field) on the subject.*
 
@@ -58,7 +58,7 @@ torch.Field
 
 mirroring the `torch.Tensor` module, and all the functionality of the `torchfields` package can be conveniently accessed through that shortcut. This shortcut gets activated at the first import (using `import torchfields`).
 
-Note, however, that the `torchfields` package is neither endorsed by or maintained by the PyTorch developer community, and is instead a separate project maintained by researchers at Princeton University.
+Note, however, that the `torchfields` package is neither endorsed by nor maintained by the PyTorch developer community, and is instead a separate project maintained by researchers at Princeton University.
 
 
 
