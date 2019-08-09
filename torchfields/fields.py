@@ -493,10 +493,10 @@ class DisplacementField(torch.Tensor):
                                 .format(type(size).__qualname__))
         if isinstance(aff, list):
             aff = tensor_type(aff, device=device)
-        if aff.ndim == 2:
+        if aff.ndimension() == 2:
             aff.unsqueeze_(0)
             N = 1
-        elif aff.ndim == 3:
+        elif aff.ndimension() == 3:
             N = aff.shape[0]
         else:
             raise ValueError("Expected 2 or 3-dimensional affine matrix. "
