@@ -2,7 +2,7 @@
 A [PyTorch](https://github.com/pytorch/pytorch) add-on for working with image mappings and displacement fields, including Spatial Transformers
 
 Torchfields provides an abstraction that neatly encapsulates the functionality of displacement fields
-as used in [Spatial Transformer Networks](https://arxiv.org/abs/1506.02025).
+as used in [Spatial Transformer Networks](https://arxiv.org/abs/1506.02025) and [Optical Flow Estimation](https://en.wikipedia.org/wiki/Optical_flow).
 
 Fields can be treated as normal PyTorch tensors for most
 purposes, and also include additional functionality for composing
