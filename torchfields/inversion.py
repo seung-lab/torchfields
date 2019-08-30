@@ -22,26 +22,27 @@ def _tensor_max(*args):
     return maximum
 
 
-def _pad(inp):
+def _pad(inp, padding=None):
     """Pads the field just enough to eliminate border effects"""
-    with torch.no_grad():
-        *_, H, W = inp.shape
-        mapping = inp.pixel_mapping()
-        pad_yl = mapping.y[..., 0, :].max().ceil().int().item()
-        pad_yh = (H-1-mapping.y[..., -1, :].min()).ceil().int().item()
-        pad_xl = mapping.x[..., :, 0].max().ceil().int().item()
-        pad_xh = (W-1-mapping.x[..., :, -1].min()).ceil().int().item()
-        pad_yl = max(pad_yl, 0) + 1
-        pad_yh = max(pad_yh, 0) + 1
-        pad_xl = max(pad_xl, 0) + 1
-        pad_xh = max(pad_xh, 0) + 1
-        # ensure that the new field is square (that is, newH = newW)
-        newH, newW = pad_yl + H + pad_yh, pad_xl + W + pad_xh
-        if newH > newW:
-            pad_xh += newH - newW
-        elif newW > newH:
-            pad_yh += newW - newH
-        padding = (pad_xl, pad_xh, pad_yl, pad_yh)
+    if padding is None:
+        with torch.no_grad():
+            *_, H, W = inp.shape
+            mapping = inp.pixel_mapping()
+            pad_yl = mapping.y[..., 0, :].max().ceil().int().item()
+            pad_yh = (H-1-mapping.y[..., -1, :].min()).ceil().int().item()
+            pad_xl = mapping.x[..., :, 0].max().ceil().int().item()
+            pad_xh = (W-1-mapping.x[..., :, -1].min()).ceil().int().item()
+            pad_yl = max(pad_yl, 0) + 1
+            pad_yh = max(pad_yh, 0) + 1
+            pad_xl = max(pad_xl, 0) + 1
+            pad_xh = max(pad_xh, 0) + 1
+            # ensure that the new field is square (that is, newH = newW)
+            newH, newW = pad_yl + H + pad_yh, pad_xl + W + pad_xh
+            if newH > newW:
+                pad_xh += newH - newW
+            elif newW > newH:
+                pad_yh += newW - newH
+            padding = (pad_xl, pad_xh, pad_yl, pad_yh)
     return (F.pad(inp.pixels(), padding, mode='replicate').field()
             .from_pixels(), padding)
 
