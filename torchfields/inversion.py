@@ -22,6 +22,20 @@ def _tensor_max(*args):
     return maximum
 
 
+class _BackContig(torch.autograd.Function):
+    """Ensure that the gradient is contiguous in the backward pass"""
+    @staticmethod
+    def forward(ctx, input):
+        return input
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.contiguous()
+
+
+_back_contig = _BackContig.apply
+
+
 def _pad(inp, padding=None):
     """Pads the field just enough to eliminate border effects"""
     if padding is None:
@@ -72,7 +86,7 @@ def _fold(inp):
     """
     pad = (0, (inp.shape[2] + 1) % 2,  # last dimension
            0, (inp.shape[1] + 1) % 2)  # second to last dimension
-    res = F.pad(inp, pad)
+    res = F.pad(_back_contig(inp), pad)
     res = F.fold(
         res.view(1, res.shape[0]*res.shape[1]*res.shape[2], -1).contiguous(),
         output_size=inp.shape[3:], kernel_size=inp.shape[1:3],
