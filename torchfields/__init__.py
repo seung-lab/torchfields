@@ -1,4 +1,4 @@
 import torch
-from .fields import DisplacementField
+from .fields import DisplacementField as Field
 
-torch.Field = DisplacementField
+torch.Field = Field
