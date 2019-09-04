@@ -177,11 +177,11 @@ def linverse(self, autopad=True):
             v_min = _tensor_min(v00, v01, v10, v11).floor()
             v_min.y.clamp_(0, field.shape[-2] - 1)
             v_min.x.clamp_(0, field.shape[-1] - 1)
-            v_max = _tensor_max(v00, v01, v10, v11).ceil()
+            v_max = _tensor_max(v00, v01, v10, v11).floor() + 1
             v_max.y.clamp_(0, field.shape[-2] - 1)
             v_max.x.clamp_(0, field.shape[-1] - 1)
             # d_x and d_y are the largest spans in x and y
-            d = (v_max - v_min).max_vector().max(0)[0].int()
+            d = (v_max - v_min).max_vector().max(0)[0].long()
             v_max = None  # del v_max
             d_x, d_y = list(d.cpu().numpy())
             d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
@@ -210,19 +210,19 @@ def linverse(self, autopad=True):
         c = (ux - v00.x)*(-v00.y + v10.y) - (-v00.x + v10.x)*(uy - v00.y)
         # quadratic formula solution (note positive root is always invalid)
         j_temp = ((b + (b.pow(2) - 4*a*c).clamp(min=eps2).sqrt()).abs()
-                  / ((2*a).abs() + eps2))
+                  / (2*a).abs().clamp(min=eps2))
         # corner case when a == 0 (reduces to `b*j + c = 0`)
-        j_temp = j_temp.where(a.abs() > eps1, -c / b)
+        j_temp = j_temp.where(a.abs() > eps1, c.abs()/b.abs().clamp(min=eps2))
         a = b = c = None  # del a, b, c
         # get i from j_temp
         i = ((uy - v00.y + (v00.y - v01.y) * j_temp).abs()
-             / ((-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp)
-                .abs() + eps2))
+             / (-v00.y + v10.y + (v00.y - v01.y - v10.y + v11.y) * j_temp)
+             .abs().clamp(min=eps2))
         j_temp = None  # del j_temp
         # j has significantly smaller rounding error for near-trapezoids
         j = ((ux - v00.x + (v00.x - v10.x) * i).abs()
-             / ((-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i)
-                .abs() + eps2))
+             / (-v00.x + v01.x + (v00.x - v10.x - v01.x + v11.x) * i)
+             .abs().clamp(min=eps2))
         # winding_number > 0 means point is contained in the quadrilateral
         wn = _winding_number(ux, uy, v00, v01, v10, v11, eps3)
         ux = uy = None  # del ux, uy
