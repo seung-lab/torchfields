@@ -267,8 +267,8 @@ class DisplacementField(torch.Tensor):
         """
         def _create_identity_mapping(size, device, tensor_type):
             id_theta = tensor_type([[[1, 0, 0], [0, 1, 0]]], device=device)
-            Id = F.affine_grid(id_theta, torch.Size((1, 1, size, size)))
-            Id *= (size - 1) / size  # rescale the identity provided by PyTorch
+            Id = F.affine_grid(id_theta, torch.Size((1, 1, size, size)),
+                               align_corners=False)
             Id = Id.permute(0, 3, 1, 2)  # move the components to 2nd position
             return Id
         # find the right set of parameters
@@ -356,17 +356,12 @@ class DisplacementField(torch.Tensor):
                               [0., 0., 1.]], device=device)
             Bi = Bi.expand(N, *Bi.shape)
             aff = torch.mm(Bi, torch.mm(A, B))[:, :2]
-        if size[-2] > 1:
-            # rescale the offset to PyTorch conventions
-            aff = torch.cat([aff[..., :2],
-                             aff[..., 2:] * (size[-2] / (size[-2] - 1))], -1)
-        M = F.affine_grid(aff, size)
+        M = F.affine_grid(aff, size, align_corners=False)
         # Id is an identity mapping without the overhead of `identity_mapping`
         id_aff = tensor_type([[1, 0, 0], [0, 1, 0]], device=device)
         id_aff = id_aff.expand(N, *id_aff.shape)
-        Id = F.affine_grid(id_aff, size)
+        Id = F.affine_grid(id_aff, size, align_corners=False)
         M = M - Id
-        M = M * ((size[-2] - 1) / size[-2])  # rescale the grid from by PyTorch
         M = M.permute(0, 3, 1, 2)  # move the components to 2nd position
         return M
 
@@ -745,10 +740,9 @@ class DisplacementField(torch.Tensor):
         if shape[-1] != shape[-2]:
             raise NotImplementedError('Sampling from non-square tensors '
                                       'not yet implemented here.')
-        scaled_field = field * (shape[-2] / (shape[-2] - 1))
-        scaled_field = scaled_field.permute(0, 2, 3, 1)
-        out = F.grid_sample(input, scaled_field, mode=mode,
-                            padding_mode=padding_mode)
+        field = field.permute(0, 2, 3, 1)  # move components to last position
+        out = F.grid_sample(input, field, mode=mode,
+                            padding_mode=padding_mode, align_corners=False)
         if isinstance(input, DisplacementField):
             out = DisplacementField._from_superclass(out)
         return out
