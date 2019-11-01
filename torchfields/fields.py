@@ -262,24 +262,15 @@ class DisplacementField(torch.Tensor):
             df = DisplacementField(1,1,10,10)
             ident = df.identity_mapping()  # uses df.shape and df.device
         """
-        def _create_identity_mapping(size, device, tensor_type):
-            id_theta = tensor_type([[[1, 0, 0], [0, 1, 0]]], device=device)
-            Id = F.affine_grid(id_theta, torch.Size((1, 1, size, size)),
-                               align_corners=False)
-            Id = Id.permute(0, 3, 1, 2)  # move the components to 2nd position
-            return Id
         # find the right set of parameters
         params = DisplacementField._get_parameters(size, size, device, dtype)
-        orig_shape, batch_dim, size, device, dtype, tensor_type = \
-            [params[key] for key in ('shape', 'batch_dim', 'size',
-                                     'device', 'dtype', 'tensor_type')]
-        Id = _create_identity_mapping(size, device, tensor_type)
-        # reshape to the desired dimensions and move to the desired device
-        if batch_dim > 1:
-            Id = Id.expand(batch_dim, *orig_shape[1:])
-        else:
-            Id = Id.view(orig_shape)
-        return Id.to(device=device, dtype=dtype)
+        orig_shape, batch_dim, device, tensor_type = \
+            [params[key] for key in ('shape', 'batch_dim',
+                                     'device', 'tensor_type')]
+        id_theta = tensor_type([[[1., 0., 0.], [0., 1., 0.]]], device=device)
+        id_theta = id_theta.expand(batch_dim, *id_theta.shape[1:])
+        Id = F.affine_grid(id_theta, orig_shape, align_corners=False)
+        return Id.permute(0, 3, 1, 2)  # move the components to 2nd position
 
     @classmethod
     def affine_field(cls, aff, size, offset=(0., 0.), device=None, dtype=None):
