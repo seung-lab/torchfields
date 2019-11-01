@@ -682,14 +682,13 @@ class DisplacementField(torch.Tensor):
     @dec_keep_type
     @ensure_dimensions(ndimensions=4, arg_indices=(1, 0), reverse=True)
     def sample(self, input, mode='bilinear', padding_mode='zeros'):
-        r"""A wrapper for the PyTorch grid sampler that uses size-agnostic
-        residual conventions.
+        r"""A wrapper for the PyTorch grid sampler to sample or warp and image
+        by a displacent field.
 
         The displacement vector field encodes relative displacements from
         which to pull from the input, where vectors with values -1 or +1
         reference a displacement equal to the distance from the center point
-        to the actual edges of the input (as opposed to the centers of the
-        border pixels as in PyTorch 1.0).
+        to the edges of the input.
 
         Args:
             `input` (Tensor): should be a PyTorch Tensor or DisplacementField
@@ -697,20 +696,29 @@ class DisplacementField(torch.Tensor):
                 dimensions :math:`(N, C, H_in, W_in)`, whenever `self` has
                 dimensions :math:`(N, 2, H_out, W_out)`.
                 The shape of the output will be :math:`(N, C, H_out, W_out)`.
+            `mode` (str): 'bilinear' or 'nearest'
             `padding_mode` (str): determines the value sampled when a
                 displacement vector's source falls outside of the input.
                 Options are:
-                 - "zeros" : produce the value zero (okay for sampling images
+                 * "zeros" : produce the value zero (okay for sampling images
                             with zero as background, but potentially
                             problematic for sampling masks and terrible for
                             sampling from other displacement vector fields)
-                 - "border" : produces the value at the nearest inbounds pixel
+                 * "border" : produces the value at the nearest inbounds pixel
                               (great for sampling from masks and from other
                               residual displacement fields)
+                 * "reflection" : reflects any sampling points that lie out
+                                  of bounds until they fall inside the
+                                  sampling range
 
         Returns:
             `output` (Tensor): the input after being warped by `self`,
             having shape :math:`(N, C, H_out, W_out)`
+
+        See the PyTorch documentation of the underlying function for additional
+        details:
+        https://pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.grid_sample
+        but note that the conventions used there are different.
         """
         field = self + self.identity_mapping()
         field = field.permute(0, 2, 3, 1)  # move components to last position
