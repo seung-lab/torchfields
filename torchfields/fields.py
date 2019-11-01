@@ -235,7 +235,7 @@ class DisplacementField(torch.Tensor):
         }
 
     @torch.no_grad()
-    def identity_mapping(size, device=None, dtype=None, cache=None):
+    def identity_mapping(size, device=None, dtype=None):
         """Returns an identity mapping with -1 and +1 at the corners of the
         image (not the centers of the border pixels as in PyTorch 1.1).
 
@@ -249,9 +249,6 @@ class DisplacementField(torch.Tensor):
             size: either an `int` or a `torch.Size` of the form `(N, C, H, W)`.
                 `H` and `W` must be the same (a square tensor).
                 `N` and `C` are ignored.
-            cache (bool): Use `cache = True` to cache the identity of this
-                size for faster recall. This speed-up can be a burden on
-                cpu/gpu memory, however, so it is disabled by default.
             device (torch.device): the device (cpu/cuda) on which to create
                 the mapping
             dtype (torch.dtype): the data type of resulting mapping. Can be
@@ -276,18 +273,7 @@ class DisplacementField(torch.Tensor):
         orig_shape, batch_dim, size, device, dtype, tensor_type = \
             [params[key] for key in ('shape', 'batch_dim', 'size',
                                      'device', 'dtype', 'tensor_type')]
-        # initialize the cache if this is the first call
-        try:
-            DisplacementField._identities
-        except AttributeError:
-            DisplacementField._identities = {}
-        # look in the cache and create from scratch if not there
-        if (size, dtype) in DisplacementField._identities:
-            Id = DisplacementField._identities[size, dtype].copy()
-        else:
-            Id = _create_identity_mapping(size, device, tensor_type)
-            if cache:
-                DisplacementField._identities[size, dtype] = Id.copy()
+        Id = _create_identity_mapping(size, device, tensor_type)
         # reshape to the desired dimensions and move to the desired device
         if batch_dim > 1:
             Id = Id.expand(batch_dim, *orig_shape[1:])
