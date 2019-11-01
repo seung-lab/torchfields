@@ -177,7 +177,7 @@ class DisplacementField(torch.Tensor):
         return field.requires_grad_(rand_tensor.requires_grad)
     rand_in_bounds_like = rand_in_bounds
 
-    def _get_parameters(tensor, size=None, device=None, dtype=None,
+    def _get_parameters(tensor, shape=None, device=None, dtype=None,
                         override=False):
         """Auxiliary function to deduce the right set of parameters to a tensor
         function.
@@ -188,7 +188,7 @@ class DisplacementField(torch.Tensor):
         those of the tensor unless they are None.
         """
         if isinstance(tensor, torch.Tensor):
-            size = size if override and (size is not None) else tensor.shape
+            shape = shape if override and (shape is not None) else tensor.shape
             device = (device if override and (device is not None)
                       else tensor.device)
             dtype = dtype if override and (dtype is not None) else tensor.dtype
@@ -200,38 +200,38 @@ class DisplacementField(torch.Tensor):
                     device = 'cpu'
             if dtype is None:
                 dtype = torch.float
-        if isinstance(size, tuple):
-            orig_shape = size
-            batch_dim = size[0] if len(size) > 3 else 1
-            if size[-1] == size[-2]:
-                size = size[-2]
-            else:
-                raise ValueError("Bad size: {}. Expected a square tensor size."
-                                 .format(size))
+        if isinstance(shape, tuple):
+            batch_dim = shape[0] if len(shape) > 3 else 1
+            if len(shape) < 2:
+                raise ValueError("The shape must have at least two spatial "
+                                 "dimensions. Recieved shape {}."
+                                 .format(shape))
+            while len(shape) < 4:
+                shape = (1,) + shape
         else:
             try:
-                orig_shape = torch.Size((1, 2, size, size))
+                shape = torch.Size((1, 2, shape, shape))
+                batch_dim = 1
             except TypeError:
-                raise TypeError("'size' must be an 'int', 'tuple', or "
+                raise TypeError("'shape' must be an 'int', 'tuple', or "
                                 "'torch.Size'. Received '{}'"
-                                .format(type(size).__qualname__))
-            batch_dim = 1
-        tensor_types = {
-            (True, torch.double): torch.DoubleTensor,
-            (True, torch.float): torch.FloatTensor,
-            (False, torch.double): torch.cuda.DoubleTensor,
-            (False, torch.float): torch.cuda.FloatTensor,
-        }
+                                .format(type(shape).__qualname__))
+        device = torch.device(device)
+        if dtype == torch.double:
+            tensor_type = (torch.DoubleTensor if device.type == 'cpu'
+                           else torch.cuda.DoubleTensor)
+        elif dtype == torch.float:
+            tensor_type = (torch.FloatTensor if device.type == 'cpu'
+                           else torch.cuda.FloatTensor)
+        else:
+            raise ValueError("The data type must be either torch.float or "
+                             "torch.double. Recieved {}.".format(dtype))
         return {
-            'shape': orig_shape,
-            'size': size,
+            'shape': shape,
             'batch_dim': batch_dim,
             'device': device,
             'dtype': dtype,
-            'tensor_type': tensor_types[
-                'cpu' in str(device),
-                dtype if dtype in [torch.double, torch.float] else torch.float
-            ]
+            'tensor_type': tensor_type
         }
 
     @torch.no_grad()
@@ -247,13 +247,16 @@ class DisplacementField(torch.Tensor):
 
         Args:
             size: either an `int` or a `torch.Size` of the form `(N, C, H, W)`.
-                `H` and `W` must be the same (a square tensor).
-                `N` and `C` are ignored.
+                `C` is ignored.
             device (torch.device): the device (cpu/cuda) on which to create
                 the mapping
             dtype (torch.dtype): the data type of resulting mapping. Can be
                 `torch.float` or `torch.double`, specifying either double
                 or single precision floating points
+
+        Returns:
+            DisplacementField of size `(N, 2, H, W)`, or `(1, 2, H, W)` if
+            `size` is given as an `int`
 
         If called on an instance of `torch.Tensor` or `DisplacementField`, the
         `size`, `device`, and `dtype` of that instance are used.
@@ -281,11 +284,11 @@ class DisplacementField(torch.Tensor):
                 affine transform
             offset: tuple with (x-offset, y-offset)
             size: an `int`, a `tuple` or a `torch.Size` of the form
-                `(N, C, H, W)`. `H` and `W` must be the same (a square tensor).
-                `N` and `C` are ignored.
+                `(N, C, H, W)`. `C` is ignored.
 
         Returns:
-            DisplacementField for the given affine transform
+            DisplacementField for the given affine transform of size
+            `(N, 2, H, W)`, or `(1, 2, H, W)` if `size` is given as an `int`
 
         Note:
             the affine matrix defines the transformation that warps the
@@ -301,15 +304,9 @@ class DisplacementField(torch.Tensor):
         """
         params = DisplacementField._get_parameters(aff, size, device, dtype,
                                                    override=True)
-        device, dtype, tensor_type = \
-            [params[key] for key in ('device', 'dtype', 'tensor_type')]
-        if not isinstance(size, tuple):
-            try:
-                size = torch.Size((1, 1, size, size))
-            except TypeError:
-                raise TypeError("'size' must be an 'int', 'tuple', or "
-                                "'torch.Size'. Received '{}'"
-                                .format(type(size).__qualname__))
+        device, dtype, tensor_type, size, batch_dim = \
+            [params[key] for key in ('device', 'dtype', 'tensor_type',
+                                     'shape', 'batch_dim')]
         if isinstance(aff, list):
             aff = tensor_type(aff, device=device)
         if aff.ndimension() == 2:
@@ -320,6 +317,9 @@ class DisplacementField(torch.Tensor):
         else:
             raise ValueError("Expected 2 or 3-dimensional affine matrix. "
                              "Received shape {}.".format(aff.shape))
+        if N == 1 and batch_dim > 1:
+            aff = aff.expand(batch_dim, *aff.shape[1:])
+            N = batch_dim
         if offset[0] != 0 or offset[1] != 0:
             z = tensor_type([[0., 0., 1.]], device=device)
             z = z.expand(N, *z.shape)
@@ -713,10 +713,6 @@ class DisplacementField(torch.Tensor):
             having shape :math:`(N, C, H_out, W_out)`
         """
         field = self + self.identity_mapping()
-        shape = input.shape
-        if shape[-1] != shape[-2]:
-            raise NotImplementedError('Sampling from non-square tensors '
-                                      'not yet implemented here.')
         field = field.permute(0, 2, 3, 1)  # move components to last position
         out = F.grid_sample(input, field, mode=mode,
                             padding_mode=padding_mode, align_corners=False)
