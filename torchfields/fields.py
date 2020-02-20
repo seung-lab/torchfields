@@ -849,12 +849,12 @@ class DisplacementField(torch.Tensor):
         return self.inverse(*args, **kwargs)
 
     @wraps(inversion.linverse)
-    def linverse(self, autopad=True):
-        return inversion.linverse(self, autopad=True)
+    def linverse(self, autopad=True, padded=0):
+        return inversion.linverse(self, autopad=autopad, padded=padded)
 
     @wraps(inversion.rinverse)
     def rinverse(self, *args, **kwargs):
-        return inversion.rinverse(self, autopad=True)
+        return inversion.rinverse(self, autopad=autopad)
 
     # Adapting functions inherited from torch.Tensor
 

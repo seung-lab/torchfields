@@ -93,7 +93,6 @@ def _fold(inp):
         padding=((inp.shape[1])//2, (inp.shape[2])//2))
     return res
 
-
 @torch.no_grad()
 def _winding_number(Px, Py, v00, v01, v10, v11, eps3):
     """Gives the winding number of a quadrilateral around a grid point
@@ -109,6 +108,9 @@ def _winding_number(Px, Py, v00, v01, v10, v11, eps3):
         # vertices in counterclockwise order (viewing y as up)
         V = torch.stack([v00, v01, v11, v10, v00], dim=0).field_()
         v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
+
+
+        """
         # initial and final vertex for each edge
         Vi, Vf = V[:-1], V[1:]
         V = None  # del V
@@ -121,6 +123,96 @@ def _winding_number(Px, Py, v00, v01, v10, v11, eps3):
         Vi = Vf = Px = Py = cross = None  # del Vi, Vf, Px, Py, cross
         # winding number = diff between number of up and down crossings
         return (upward.int() - downward.int()).sum(dim=0)
+        """
+
+
+        # initial and final vertex for each edge
+        Vi, Vf = V[:-1], V[1:]
+        V = None  # del V
+        Vi_comp = (Vi.y <= Py)
+        Vf_comp = (Vf.y <= Py)
+        xd = Vf.x - Vi.x
+        yd = Vf.y - Vi.y
+        Vf = None
+        """
+        if (Px.shape[2] * Px.shape[3]) > 36:
+            print("large displacement detected - proceeding piecewise")
+            upward = Vi_comp.clone()
+            downward = Vi_comp.clone()
+            print(upward.shape)
+            for i in range(0, Px.shape[2]):
+              for j in range(0, Px.shape[3]):
+                Pxp = Px[:, :, i, j, ...]
+                Pyp = Px[:, :, i, j, ...]
+                d1p = Pyp - Vi.y
+                d2p = Pxp - Vi.x
+                d1p.mul_(xd)
+                d2p.mul_(yd)
+                d1p.sub_(d2p)
+                cross_piece = d1p > -eps3
+                upward[:, :, :, i, j, ...] = Vi_comp[:, :, :, i, j, ...] & ~Vf_comp[:, :, :, i, j, ...] & cross_piece[...]
+                downward[:, :, :, i, j, ...] = ~Vi_comp[:, :, :, i, j, ...] & Vf_comp[:, :, :, i, j, ...] & ~cross_piece[...]
+            
+            Vi = xd = yd = d1 = d2 = d1p = d2p = cross_piece = Pxp = Pyp = None # del cross
+            upwardintsum = upward.sum(dim=0, dtype=torch.int8)
+            upward = None # del upward
+            downwardintsum = downward.sum(dim=0, dtype=torch.int8)
+            downward = None # del downward
+            return (upwardintsum - downwardintsum)
+            """
+        """    
+        if (Px.shape[2] * Px.shape[3]) > 36:
+            print("large displacement detected - proceeding piecewise")
+            upwardintsum = torch.zeros([1, *list(Vi_comp.shape[2:])], device = Vi_comp.device, dtype = torch.int8)
+            downwardintsum = torch.zeros([1, *list(Vi_comp.shape[2:])], device = Vi_comp.device, dtype = torch.int8)
+            for i in range(0, Px.shape[2]):
+              for j in range(0, Px.shape[3]):
+                Pxp = Px[:, :, i, j, ...]
+                Pyp = Px[:, :, i, j, ...]
+                d1p = Pyp - Vi.y
+                d2p = Pxp - Vi.x
+                d1p.mul_(xd)
+                d2p.mul_(yd)
+                d1p.sub_(d2p)
+                cross_piece = d1p > -eps3
+                t=(Vi_comp[:, :, :, i:i+1, j:j+1, ...] & ~Vf_comp[:, :, :, i:i+1, j:j+1, ...] & cross_piece).sum(dim=0, dtype=torch.int8)
+                print(t.shape)
+                
+                upwardintsum[:, :, i:i+1, j:j+1, ...] = (Vi_comp[:, :, :, i:i+1, j:j+1, ...] & ~Vf_comp[:, :, :, i:i+1, j:j+1, ...] & cross_piece).sum(dim=0, dtype=torch.int8)
+                downwardintsum[:, :, i:i+1, j:j+1, ...] = (~Vi_comp[:, :, :, i:i+1, j:j+1, ...] & Vf_comp[:, :, :, i:i+1, j:j+1, ...] & ~cross_piece).sum(dim=0, dtype=torch.int8)
+            
+            Vi = xd = yd = d1 = d2 = d1p = d2p = cross_piece = Pxp = Pyp = None # del cross
+            print(upwardintsum.shape)
+            return (upwardintsum - downwardintsum)
+          """  
+                
+
+        # sign of cross product indicates direction around grid point
+        # using in-place as much as possible to avoid memory usage
+        d1 = Py - Vi.y
+        d2 = Px - Vi.x
+        Vi = None
+        d1.mul_(xd)
+        d2.mul_(yd)
+        d1.sub_(d2)
+        cross_comp = (d1 > -eps3)
+
+        Vi = xd = yd = d1 = d2 = d1p = d2p = cross_piece = Pxp = Pyp = None # del cross
+        # upward crossing of rightward ray from grid point
+        upward = Vi_comp & ~Vf_comp & cross_comp
+        # count
+        upwardintsum = upward.sum(dim=0, dtype=torch.int8)
+        upward = None # del upward
+        # downward crossing of rightward ray from grid point
+        downward = ~Vi_comp & Vf_comp & ~cross_comp
+        # count
+        downwardintsum = downward.sum(dim=0, dtype=torch.int8)
+        downward = None # del downward
+        Vi = Vf = Px = Py = cross_comp = None  # del Vi, Vf, Px, Py, cross
+        # winding number = diff between number of up and down crossings
+        return (upwardintsum.sub_(downwardintsum))
+
+
     except RuntimeError:
         # In case this is an out-of-memory error, clear temp tensors
         v00 = v01 = v10 = v11 = Px = Py = None
@@ -133,7 +225,7 @@ def _winding_number(Px, Py, v00, v01, v10, v11, eps3):
 #############################
 
 @ensure_dimensions(ndimensions=4, arg_indices=(0), reverse=True)
-def linverse(self, autopad=True):
+def linverse(self, autopad=True, padded=0):
     r"""Return a left inverse approximation for the displacement field
 
     Given a displacement field `f`, its left inverse is a displacement
@@ -155,6 +247,41 @@ def linverse(self, autopad=True):
     eps2 = eps1 * 2**(-10)
     # tolarance for point containment in a quadrilateral
     eps3 = 2**-16
+
+    if padded != 0:
+        field = (self[:, :, padded:-padded, padded:-padded]).field()
+
+        # vectors at the four corners of each pixel's quadrilateral
+        mapping = field.pixel_mapping()
+        v00 = mapping[..., :-1, :-1]
+        v01 = mapping[..., :-1, 1:]
+        v10 = mapping[..., 1:, :-1]
+        v11 = mapping[..., 1:, 1:]
+        mapping = None  # del mapping
+
+        with torch.no_grad():
+            # find each quadrilateral's (set of 4 vectors) span, in pixels
+            v_min = _tensor_min(v00, v01, v10, v11).floor()
+            v_min.y.clamp_(0, field.shape[-2] - 1)
+            v_min.x.clamp_(0, field.shape[-1] - 1)
+            v_max = _tensor_max(v00, v01, v10, v11).floor() + 1
+            v_max.y.clamp_(0, field.shape[-2] - 1)
+            v_max.x.clamp_(0, field.shape[-1] - 1)
+            # d_x and d_y are the largest spans in x and y
+            d = (v_max - v_min).max_vector().max(0)[0].long()
+            v_max = None  # del v_max
+            d_x, d_y = list(d.cpu().numpy())
+            print("unpadded dx, dy: " + str(d_x) + " " + str(d_y) )
+            d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
+                 .unsqueeze(-1).unsqueeze(-1)).to(v_min)
+            v_min.y.clamp_(0, field.shape[-2] - 1 - d_y)
+            v_min.x.clamp_(0, field.shape[-1] - 1 - d_x)
+            # u is an identity pixel mapping of a d_y by d_x neighborhood
+            u = field.identity().pixel_mapping()[..., :d_y, :d_x].round()
+            ux = u.x.unsqueeze(-1).unsqueeze(-1)
+            uy = u.y.unsqueeze(-1).unsqueeze(-1)
+            u = None  # del u
+
 
     try:
         # pad the field
@@ -181,13 +308,14 @@ def linverse(self, autopad=True):
             v_max.y.clamp_(0, field.shape[-2] - 1)
             v_max.x.clamp_(0, field.shape[-1] - 1)
             # d_x and d_y are the largest spans in x and y
-            d = (v_max - v_min).max_vector().max(0)[0].long()
+            d_p = (v_max - v_min).max_vector().max(0)[0].long()
             v_max = None  # del v_max
-            d_x, d_y = list(d.cpu().numpy())
-            d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
-                 .unsqueeze(-1).unsqueeze(-1)).to(v_min)
+            d_x_p, d_y_p = list(d_p.cpu().numpy())
+            #d = ((d//2).unsqueeze(-1).unsqueeze(-1)  # center of the span
+            #     .unsqueeze(-1).unsqueeze(-1)).to(v_min)
             v_min.y.clamp_(0, field.shape[-2] - 1 - d_y)
             v_min.x.clamp_(0, field.shape[-1] - 1 - d_x)
+            print("padded dx, dy: " + str(d_x_p) + " " + str(d_y_p) )
             # u is an identity pixel mapping of a d_y by d_x neighborhood
             u = field.identity().pixel_mapping()[..., :d_y, :d_x].round()
             ux = u.x.unsqueeze(-1).unsqueeze(-1)
@@ -233,8 +361,20 @@ def linverse(self, autopad=True):
         v01 = field[..., :-1, 1:].unsqueeze(-3).unsqueeze(-3)
         v10 = field[..., 1:, :-1].unsqueeze(-3).unsqueeze(-3)
         v11 = field[..., 1:, 1:].unsqueeze(-3).unsqueeze(-3)
+        #unrolled version of: inv = -((1-i)*(1-j)*v00 + (1-i)*j*v01 + i*(1-j)*v10 + i*j*v11)
         inv = -((1-i)*(1-j)*v00 + (1-i)*j*v01 + i*(1-j)*v10 + i*j*v11)
-        v00 = v01 = v10 = v11 = None  # del v00, v01, v10, v11
+        v00 = v01 = v10 = v11 = None # del v00, v01, v10, v11
+
+        """
+        v00.mul_((1-i)*(1-j))
+        v01.mul_((1-i)*(  j))
+        v10.mul_((i)  *(1-j))
+        v11.mul_((i)  *(  j))
+        v01.sum_(v10)
+        v01.sum_(v11)
+        v01.sub_(v00)
+        inv = v01
+        v00 = v10 = v11 = None  # del v00, v10, v11"""
 
         # mask out inverse vectors at points outside the quadrilaterals
         mask = (wn > 0) & torch.isfinite(i) & torch.isfinite(j)
