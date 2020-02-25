@@ -48,19 +48,40 @@ def vote(self, softmin_temp=1, blur_sigma=1):
         DisplacementField of shape (1, 2, H, W) containing the vector
         voting result
     """
+    field_weights = get_field_weights(self, 
+                                      softmin_temp=softmin_temp,
+                                      blur_sigma=blur_sigma)
+    partition = field_weights.sum(dim=0, keepdim=True)
+    field_weights = field_weights / partition
+    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+
+def get_field_weights(field, softmin_temp=1, blur_sigma=1):
+    """Calculate softmin weights for set of fields, indicating which fields
+    should be considered consensus.
+
+    Args:
+        field: DisplacementField of shape (N, 2, H, W)
+        softmin_temp (float): temperature of softmin to use
+        blur_sigma (float): std dev of the Gaussian kernel by which to blur
+            the softmin inputs. Note that the outputs are not blurred.
+            None or 0 means no blurring.
+
+    Returns:
+        torch.Tensor of shape (N, 1, H, W) containing the field weights 
+    """
     from itertools import combinations
-    if self.ndimension() != 4:
+    if field.ndimension() != 4:
         raise ValueError('Vector voting is only implemented on '
                          'displacement fields with 4 dimensions. '
-                         'The input has {}.'.format(self.ndimension()))
-    n, _two_, *shape = self.shape
+                         'The input has {}.'.format(field.ndimension()))
+    n, _two_, *shape = field.shape
     if n == 1:
-        return self
+        return field
     elif n % 2 == 0:
         raise ValueError('Cannot vetor vote on an even number of '
                          'displacement fields: {}'.format(n))
     m = (n + 1) // 2  # smallest number that constututes a majority
-    blurred = self.gaussian_blur(sigma=blur_sigma) if blur_sigma else self
+    blurred = field.gaussian_blur(sigma=blur_sigma) if blur_sigma else field
 
     # compute distances for all pairs of fields
     dists = torch.zeros((n, n, *shape)).to(device=blurred.device)
@@ -87,6 +108,4 @@ def vote(self, softmin_temp=1, blur_sigma=1):
     for i, mtuple in enumerate(mtuples):
         for j in mtuple:
             field_weights[j] += mt_weights[i]
-    field_weights = field_weights / field_weights.sum(dim=0, keepdim=True)
-
-    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+    return field_weights
