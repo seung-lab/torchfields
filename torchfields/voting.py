@@ -43,7 +43,7 @@ def get_vote_subsets(self):
     return mtuples
 
 def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
-    """Calculate softmin weights for batch of displacement fields, indicating 
+    """Calculate per field weights for batch of displacement fields, indicating 
     which fields should be considered consensus.
 
     Args:
@@ -54,8 +54,7 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
             None or 0 means no blurring.
 
     Returns:
-        softmin numerator (torch.Tensor): (N, 1, H, W)
-        softmin denominator (torch. Tensor): (N, 1, H, W)
+        per field weight (torch.Tensor): (N, 1, H, W)
     """
     from itertools import combinations
     if self.ndimension() != 4:
@@ -90,10 +89,20 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
     # compute weights for mtuples: smaller mean distance -> higher weight
     # computing softmin explicitly for access to numerator & denominator
     # equivalent to:
-    # (-mavg/softmin_temp).softmax(dim=0) == weights_num / weight_den
-    weights_num = torch.exp(-mavg/softmin_temp)
-    weights_den = weights_num.sum(dim=0, keepdim=True)
-    return weights_num, weights_den
+    # (-mavg/softmin_temp).softmax(dim=0) == mt_weights_num / mt_weights_den
+    mt_weights_num = torch.exp(-mavg/softmin_temp)
+    mt_weights_den = mt_weights_num.sum(dim=0, keepdim=True)
+
+    mt_weights = mt_weights_num / mt_weights_den 
+    # assign mtuple weights back to individual fields
+    field_weights = torch.zeros((n, *shape)).to(device=mt_weights.device)
+    for i, mtuple in enumerate(mtuples):
+        for j in mtuple:
+            field_weights[j] += mt_weights[i]
+    # rather than use m, prefer sum for sum precision
+    elements_per_subset = field_weights.sum(dim=0, keepdim=True)
+    field_weights = field_weights / elements_per_subset
+    return field_weights
 
 def vote(self, softmin_temp=1, blur_sigma=1):
     """Produce a single, consensus displacement field from a batch of
@@ -117,15 +126,6 @@ def vote(self, softmin_temp=1, blur_sigma=1):
     """
     n, shape = self.get_vote_shape()
     mtuples = self.get_vote_subsets()
-    mt_num , mt_den = self.get_vote_weights(softmin_temp=softmin_temp,
+    field_weights = self.get_vote_weights(softmin_temp=softmin_temp,
                                               blur_sigma=blur_sigma)
-    mt_weights = mt_num / mt_den 
-    # assign mtuple weights back to individual fields
-    field_weights = torch.zeros((n, *shape)).to(device=mt_weights.device)
-    for i, mtuple in enumerate(mtuples):
-        for j in mtuple:
-            field_weights[j] += mt_weights[i]
-    # rather than use m, prefer sum for sum precision
-    elements_per_subset = field_weights.sum(dim=0, keepdim=True)
-    field_weights = field_weights / elements_per_subset
     return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
