@@ -888,5 +888,17 @@ class DisplacementField(torch.Tensor):
         return voting.gaussian_blur(self, sigma, kernel_size)
 
     @wraps(voting.vote)
+    def get_vote_shape(self):
+        return voting.get_vote_shape(self)
+
+    @wraps(voting.vote)
+    def get_vote_subsets(self):
+        return voting.get_vote_subsets(self)
+
+    @wraps(voting.vote)
+    def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
+        return voting.get_vote_weights(self, softmin_temp, blur_sigma)
+
+    @wraps(voting.vote)
     def vote(self, softmin_temp=1, blur_sigma=1):
         return voting.vote(self, softmin_temp, blur_sigma)
