@@ -66,7 +66,7 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
                          'The input has {}.'.format(self.ndimension()))
     n, shape = self.get_vote_shape()
     if n == 1:
-        return self 
+        return torch.ones((1, *shape)) 
     # elif n % 2 == 0:
     #     raise ValueError('Cannot vetor vote on an even number of '
     #                      'displacement fields: {}'.format(n))
