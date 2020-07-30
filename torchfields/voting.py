@@ -33,16 +33,18 @@ def get_vote_shape(self):
     n, _, *shape = self.shape
     return n, shape
 
-def get_vote_subsets(self):
+def get_vote_subsets(self, subset_size=None):
     """Compute list of majority subsets to use in vote
     """
     n, _ = self.get_vote_shape()
     m = (n + 1) // 2  # smallest number that constututes a majority
+    if subset_size is not None:
+        m = subset_size
     from itertools import combinations
     mtuples = list(combinations(range(n), m))
     return mtuples
 
-def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
+def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
     """Calculate per field weights for batch of displacement fields, indicating 
     which fields should be considered consensus.
 
@@ -52,6 +54,7 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
         blur_sigma (float): std dev of the Gaussian kernel by which to blur
             the softmin inputs. Note that the outputs are not blurred.
             None or 0 means no blurring.
+        subset_size (int): number of members to each set for comparison
 
     Returns:
         per field weight (torch.Tensor): (N, 1, H, W)
@@ -64,11 +67,11 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
     n, shape = self.get_vote_shape()
     if n == 1:
         return self 
-    elif n % 2 == 0:
-        raise ValueError('Cannot vetor vote on an even number of '
-                         'displacement fields: {}'.format(n))
+    # elif n % 2 == 0:
+    #     raise ValueError('Cannot vetor vote on an even number of '
+    #                      'displacement fields: {}'.format(n))
     blurred = self.gaussian_blur(sigma=blur_sigma) if blur_sigma else self
-    mtuples = self.get_vote_subsets()
+    mtuples = self.get_vote_subsets(subset_size=subset_size)
 
     # compute distances for all pairs of fields
     dists = torch.zeros((n, n, *shape)).to(device=blurred.device)
@@ -104,7 +107,7 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1):
     field_weights = field_weights / elements_per_subset
     return field_weights
 
-def vote(self, softmin_temp=1, blur_sigma=1):
+def vote(self, softmin_temp=1, blur_sigma=1, subset_size=None):
     """Produce a single, consensus displacement field from a batch of
     displacement fields
 
@@ -119,13 +122,13 @@ def vote(self, softmin_temp=1, blur_sigma=1):
         blur_sigma (float): std dev of the Gaussian kernel by which to blur
             the softmin inputs. Note that the outputs are not blurred.
             None or 0 means no blurring.
+        subset_size (int): number of members to each subset
 
     Returns:
         DisplacementField of shape (1, 2, H, W) containing the vector
         vote result
     """
-    n, shape = self.get_vote_shape()
-    mtuples = self.get_vote_subsets()
     field_weights = self.get_vote_weights(softmin_temp=softmin_temp,
-                                              blur_sigma=blur_sigma)
+                                              blur_sigma=blur_sigma,
+                                              subset_size=subset_size)
     return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
