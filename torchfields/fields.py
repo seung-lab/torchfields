@@ -891,6 +891,10 @@ class DisplacementField(torch.Tensor):
         return voting.get_vote_shape(self)
 
     @wraps(voting.vote)
+    def get_subset_size(self, subset_size=None):
+        return voting.get_subset_size(self, subset_size)
+
+    @wraps(voting.vote)
     def get_vote_subsets(self, subset_size=None):
         return voting.get_vote_subsets(self, subset_size)
 
@@ -901,3 +905,13 @@ class DisplacementField(torch.Tensor):
     @wraps(voting.vote)
     def vote(self, softmin_temp=1, blur_sigma=1, subset_size=None):
         return voting.vote(self, softmin_temp, blur_sigma, subset_size)
+
+    @wraps(voting.vote)
+    def get_vote_weights_with_variances(self, var, softmin_temp=1, blur_sigma=1, 
+                                        subset_size=None):
+        return voting.get_vote_weights_with_variances(self, var, softmin_temp, blur_sigma, 
+                                                      subset_size)
+
+    @wraps(voting.vote)
+    def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=None):
+        return voting.vote_with_variances(self, var, softmin_temp, blur_sigma, subset_size)
