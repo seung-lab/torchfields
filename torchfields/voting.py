@@ -33,16 +33,23 @@ def get_vote_shape(self):
     n, _, *shape = self.shape
     return n, shape
 
-def get_vote_subsets(self, subset_size=None):
-    """Compute list of majority subsets to use in vote
+def get_subset_size(self, subset_size=None):
+    """Compute smallest majority of self is subset_size not set
     """
     n, _ = self.get_vote_shape()
     m = (n + 1) // 2  # smallest number that constututes a majority
     if subset_size is not None:
         m = subset_size
+    return m
+
+def get_vote_subsets(self, subset_size=None):
+    """Compute list of majority subsets to use in vote
+    """
+    n, _ = self.get_vote_shape()
+    m = self.get_subset_size(subset_size=subset_size)
     from itertools import combinations
-    mtuples = list(combinations(range(n), m))
-    return mtuples
+    subset_tuples = list(combinations(range(n), m))
+    return subset_tuples
 
 def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
     """Calculate per field weights for batch of displacement fields, indicating 
@@ -65,10 +72,11 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
                          'displacement fields with 4 dimensions. '
                          'The input has {}.'.format(self.ndimension()))
     n, shape = self.get_vote_shape()
+    subset_size = self.get_subset_size(subset_size=subset_size)
     if n == 1:
         return torch.ones((1, *shape)).to(self)
-    elif n == 2:
-        return torch.ones((1, *shape)).to(self) / 2
+    if n == subset_size:
+        return torch.ones((1, *shape)).to(self) / n
     # elif n % 2 == 0:
     #     raise ValueError('Cannot vetor vote on an even number of '
     #                      'displacement fields: {}'.format(n))
@@ -131,6 +139,98 @@ def vote(self, softmin_temp=1, blur_sigma=1, subset_size=None):
         vote result
     """
     field_weights = self.get_vote_weights(softmin_temp=softmin_temp,
+                                              blur_sigma=blur_sigma,
+                                              subset_size=subset_size)
+    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+
+def get_vote_weights_with_variances(self, var, softmin_temp=1, 
+                                          blur_sigma=1, subset_size=None):
+    """Calculate consensus field from batch of displacement fields along with variances.
+    Each vector within self is treated as the mean of a distribution with isotropic 
+    variance for the corresponding location in variances. A subset of vectors is
+    considered a mixture distribution. We assign higher weight to mixture distributions 
+    with lower variances.
+
+    Weights should be proportional to get_vote_weights if variances are zero.
+
+    Args:
+        self: DisplacementField of shape (N, 2, H, W)
+        var: Tensor of shape (N, 1, H, W)
+        softmin_temp (float): temperature of softmin to use
+        blur_sigma (float): std dev of the Gaussian kernel by which to blur
+            the softmin inputs. Note that the outputs are not blurred.
+            None or 0 means no blurring.
+        subset_size (int): number of members to each set for comparison
+
+    Returns:
+        per field weight (torch.Tensor): (N, 1, H, W)
+    """
+    from itertools import combinations
+    if self.ndimension() != 4:
+        raise ValueError('Vector vote is only implemented on '
+                         'displacement fields with 4 dimensions. '
+                         'The input has {}.'.format(self.ndimension()))
+    n, shape = self.get_vote_shape()
+    subset_size = self.get_subset_size(subset_size=subset_size)
+    if n == 1:
+        return torch.ones((1, *shape)).to(self)
+    if n == subset_size:
+        return torch.ones((1, *shape)).to(self) / n
+    blurred = self.gaussian_blur(sigma=blur_sigma) if blur_sigma else self
+    variances = torch.cat([var, var], dim=1)
+    subset_tuples = self.get_vote_subsets(subset_size=subset_size)
+
+    # compute mean of mixture distribution for all subset tuples
+    subset_avg = {}
+    for subset in subset_tuples:
+        s_avg = torch.stack([blurred[i] for i in subset]).mean(dim=0)
+        subset_avg[subset] = s_avg
+
+    # compute variance of mixture distribution for all subset tuples
+    subset_var = []
+    for subset in subset_tuples:
+        s_moment_sum = torch.stack([variances[i] + blurred[i].pow(2) for i in subset])
+        s_var = (s_moment_sum - (len(subset) * subset_avg[subset].pow(2))).mean(dim=0)
+        subset_var.append(s_var)
+    subset_std_dist = torch.stack(subset_var).pow(2).sum(dim=-3).sqrt()
+
+    # compute weights for subset_tuples: smaller variance -> higher weight
+    # computing softmin explicitly for access to numerator & denominator
+    # equivalent to:
+    # subset_weights == (-subset_std_dist/softmin_temp).softmax(dim=0)
+    subset_weights_num = torch.exp(-subset_std_dist/softmin_temp)
+    subset_weights_den = subset_weights_num.sum(dim=0, keepdim=True)
+
+    subset_weights = subset_weights_num / subset_weights_den 
+    # assign subset weights back to individual fields
+    field_weights = torch.zeros((n, *shape)).to(device=subset_weights.device)
+    for i, subset in enumerate(subset_tuples):
+        for j in subset:
+            field_weights[j] += subset_weights[i]
+    # rather than use subset_size, prefer sum for sum precision
+    elements_per_subset = field_weights.sum(dim=0, keepdim=True)
+    field_weights = field_weights / elements_per_subset
+    return field_weights
+
+def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=None):
+    """Produce a single, consensus displacement field from a batch of
+    distributions, with displacement fields as mean and variances.
+
+    Args:
+        self: DisplacementField of shape (N, 2, H, W)
+        var: Tensor of shape (N, 1, H, W)
+        softmin_temp (float): temperature of softmin to use
+        blur_sigma (float): std dev of the Gaussian kernel by which to blur
+            the softmin inputs. Note that the outputs are not blurred.
+            None or 0 means no blurring.
+        subset_size (int): number of members to each subset
+
+    Returns:
+        DisplacementField of shape (1, 2, H, W) containing the vector
+        vote result
+    """
+    field_weights = self.get_vote_weights_with_variances(softmin_temp=softmin_temp,
+                                              var=var,
                                               blur_sigma=blur_sigma,
                                               subset_size=subset_size)
     return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
