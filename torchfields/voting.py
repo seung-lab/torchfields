@@ -177,7 +177,8 @@ def get_vote_weights_with_variances(self, var, softmin_temp=1,
     if n == subset_size:
         return torch.ones((1, *shape)).to(self) / n
     blurred = self.gaussian_blur(sigma=blur_sigma) if blur_sigma else self
-    variances = torch.cat([var, var], dim=1)
+    variances = torch.cat([var, var], dim=1).field()
+    variances = variances.gaussian_blur(sigma=blur_sigma) if blur_sigma else variances
     subset_tuples = self.get_vote_subsets(subset_size=subset_size)
 
     # compute mean of mixture distribution for all subset tuples
@@ -186,13 +187,13 @@ def get_vote_weights_with_variances(self, var, softmin_temp=1,
         s_avg = torch.stack([blurred[i] for i in subset]).mean(dim=0)
         subset_avg[subset] = s_avg
 
-    # compute variance of mixture distribution for all subset tuples
-    subset_var = []
+    # compute standard deviations of mixture distribution for all subset tuples
+    subset_std = []
     for subset in subset_tuples:
         s_moment_sum = torch.stack([variances[i] + blurred[i].pow(2) for i in subset])
-        s_var = (s_moment_sum - (len(subset) * subset_avg[subset].pow(2))).mean(dim=0)
-        subset_var.append(s_var)
-    subset_std_dist = torch.stack(subset_var).pow(2).sum(dim=-3).sqrt()
+        s_var = (s_moment_sum - subset_avg[subset].pow(2)).mean(dim=0)
+        subset_std.append(s_var.abs().sqrt())
+    subset_std_dist = torch.stack(subset_std).pow(2).sum(dim=-3).sqrt()
 
     # compute weights for subset_tuples: smaller variance -> higher weight
     # computing softmin explicitly for access to numerator & denominator
