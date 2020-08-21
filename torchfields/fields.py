@@ -332,7 +332,7 @@ class DisplacementField(torch.Tensor):
                               [0., 1., -offset[1]],
                               [0., 0., 1.]], device=device)
             Bi = Bi.expand(N, *Bi.shape)
-            aff = torch.mm(Bi, torch.mm(A, B))[:, :2]
+            aff = torch.matmul(Bi, torch.matmul(A, B))[:, :2]
         M = F.affine_grid(aff, size, align_corners=False)
         # Id is an identity mapping without the overhead of `identity_mapping`
         id_aff = tensor_type([[1, 0, 0], [0, 1, 0]], device=device)
