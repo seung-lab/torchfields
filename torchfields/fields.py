@@ -722,7 +722,8 @@ class DisplacementField(torch.Tensor):
         """
         field = self + self.identity_mapping()
         field = field.permute(0, 2, 3, 1)  # move components to last position
-        out = F.grid_sample(input, field, mode=mode,
+        # AMP fix per https://github.com/pytorch/pytorch/issues/42218#issuecomment-691559227
+        out = F.grid_sample(input.float(), field.float(), mode=mode,
                             padding_mode=padding_mode, align_corners=False)
         if isinstance(input, DisplacementField):
             out = DisplacementField._from_superclass(out)
