@@ -4,8 +4,7 @@ import torch
 import torch.nn.functional as F
 from functools import wraps
 
-from .utils import (return_subclass_type, dec_keep_type, permute_input,
-                    permute_output, ensure_dimensions)
+from .utils import (permute_input, permute_output, ensure_dimensions)
 from . import inversion
 from . import voting
 
@@ -14,7 +13,6 @@ from . import voting
 # DisplacementField Class Definition
 ####################################
 
-@return_subclass_type
 class DisplacementField(torch.Tensor):
     """An abstraction that encapsulates functionality of displacement fields
     as used in Spatial Transformer Networks.
@@ -23,6 +21,15 @@ class DisplacementField(torch.Tensor):
     purposes, and also include additional functionality for composing
     displacements and sampling from tensors.
     """
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if not all(issubclass(cls, t) for t in types):
+            return NotImplemented
+
+        return super().__torch_function__(func, types, args, kwargs)
 
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls, *args, **kwargs)
@@ -42,7 +49,6 @@ class DisplacementField(torch.Tensor):
 
     # Conversion to and from torch.Tensor
 
-    @dec_keep_type
     def field_(self, *args, **kwargs):
         """Converts a `torch.Tensor` to a `DisplacementField`
 
@@ -72,7 +78,6 @@ class DisplacementField(torch.Tensor):
     torch.Tensor.field_ = field_  # adds conversion to torch.Tensor superclass
     _from_superclass = field_  # for use in `return_subclass_type()`
 
-    @dec_keep_type
     def field(data, *args, **kwargs):
         """Converts a `torch.Tensor` to a `DisplacementField`
         """
@@ -84,7 +89,6 @@ class DisplacementField(torch.Tensor):
     torch.Tensor.field = field  # adds conversion to torch.Tensor superclass
     torch.field = field
 
-    @dec_keep_type
     def tensor_(self):
         """Converts the `DisplacementField` to a standard `torch.Tensor`
         in-place
@@ -98,7 +102,6 @@ class DisplacementField(torch.Tensor):
         self.__class__ = torch.Tensor
         return self
 
-    @dec_keep_type
     def tensor(self):
         """Converts the `DisplacementField` to a standard `torch.Tensor`
         """
@@ -119,7 +122,7 @@ class DisplacementField(torch.Tensor):
                 kwargs['size'] = tensor_like.shape
             if 'dtype' not in kwargs or kwargs['dtype'] is None:
                 kwargs['dtype'] = tensor_like.dtype
-        return torch.zeros(*args, **kwargs)
+        return torch.zeros(*args, **kwargs).field_()
     zeros_like = zeros = identity
 
     def ones(*args, **kwargs):
@@ -139,7 +142,7 @@ class DisplacementField(torch.Tensor):
                 kwargs['size'] = tensor_like.shape
             if 'dtype' not in kwargs or kwargs['dtype'] is None:
                 kwargs['dtype'] = tensor_like.dtype
-        return torch.ones(*args, **kwargs)
+        return torch.ones(*args, **kwargs).field_()
     ones_like = ones
 
     def rand(*args, **kwargs):
@@ -156,7 +159,7 @@ class DisplacementField(torch.Tensor):
                 kwargs['size'] = tensor_like.shape
             if 'dtype' not in kwargs or kwargs['dtype'] is None:
                 kwargs['dtype'] = tensor_like.dtype
-        return torch.rand(*args, **kwargs)
+        return torch.rand(*args, **kwargs).field_()
     rand_like = rand
 
     @torch.no_grad()
@@ -273,7 +276,7 @@ class DisplacementField(torch.Tensor):
         id_theta = tensor_type([[[1., 0., 0.], [0., 1., 0.]]], device=device)
         id_theta = id_theta.expand(batch_dim, *id_theta.shape[1:])
         Id = F.affine_grid(id_theta, orig_shape, align_corners=False)
-        return Id.permute(0, 3, 1, 2)  # move the components to 2nd position
+        return Id.permute(0, 3, 1, 2).field_()  # move the components to 2nd position
 
     @classmethod
     def affine_field(cls, aff, size, offset=(0., 0.), device=None, dtype=None):
@@ -339,7 +342,7 @@ class DisplacementField(torch.Tensor):
         id_aff = id_aff.expand(N, *id_aff.shape)
         Id = F.affine_grid(id_aff, size, align_corners=False)
         M = M - Id
-        M = M.permute(0, 3, 1, 2)  # move the components to 2nd position
+        M = M.permute(0, 3, 1, 2).field_()  # move the components to 2nd position
         return M
 
     # Basic vector field properties
@@ -386,10 +389,9 @@ class DisplacementField(torch.Tensor):
             return is_id
 
     def __bool__(self):
-        return not self.is_identity()
+        return not self.is_identity().tensor_()
     __nonzero__ = __bool__
 
-    @dec_keep_type
     def magnitude(self, keepdim=False):
         """Computes the magnitude of the displacement at each location in the
         displacement field
@@ -403,7 +405,6 @@ class DisplacementField(torch.Tensor):
         """
         return self.tensor().pow(2).sum(dim=-3, keepdim=keepdim).sqrt()
 
-    @dec_keep_type
     def distance(self, other, keepdim=False) -> torch.Tensor:
         """Compute the pointwise Euclidean distance between two displacement
         fields
@@ -679,7 +680,6 @@ class DisplacementField(torch.Tensor):
 
     # Functions for sampling, composing, mapping, warping
 
-    @dec_keep_type
     @ensure_dimensions(ndimensions=4, arg_indices=(1, 0), reverse=True)
     def sample(self, input, mode='bilinear', padding_mode='zeros'):
         r"""A wrapper for the PyTorch grid sampler to sample or warp and image
@@ -724,8 +724,8 @@ class DisplacementField(torch.Tensor):
         field = field.permute(0, 2, 3, 1)  # move components to last position
         out = F.grid_sample(input, field, mode=mode,
                             padding_mode=padding_mode, align_corners=False)
-        if isinstance(input, DisplacementField):
-            out = DisplacementField._from_superclass(out)
+        if not isinstance(input, DisplacementField):
+            out.tensor_()
         return out
 
     def compose_with(self, other, mode='bilinear'):
@@ -744,7 +744,6 @@ class DisplacementField(torch.Tensor):
         """
         return self + self.sample(other, padding_mode='border')
 
-    @dec_keep_type
     def __call__(self, x, mode='bilinear'):
         """Syntactic sugar for `compose_with()` or `sample()`, depending on
         the type of the sampled tensor.
