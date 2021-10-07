@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from functools import wraps
 
-from .utils import (permute_input, permute_output, ensure_dimensions)
+from .utils import permute_input, permute_output, ensure_dimensions
 from . import inversion
 from . import voting
 
@@ -12,6 +12,7 @@ from . import voting
 ####################################
 # DisplacementField Class Definition
 ####################################
+
 
 class DisplacementField(torch.Tensor):
     """An abstraction that encapsulates functionality of displacement fields
@@ -21,6 +22,7 @@ class DisplacementField(torch.Tensor):
     purposes, and also include additional functionality for composing
     displacements and sampling from tensors.
     """
+
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -36,16 +38,19 @@ class DisplacementField(torch.Tensor):
 
     def __init__(self, *args, **kwargs):
         if len(self.shape) < 3:
-            raise ValueError('The displacement field must have a components '
-                             'dimension. Only {} dimensions are present.'
-                             .format(len(self.shape)))
+            raise ValueError(
+                "The displacement field must have a components "
+                "dimension. Only {} dimensions are present.".format(len(self.shape))
+            )
         if self.shape[-3] != 2:
-            raise ValueError('The displacement field must have exactly 2 '
-                             'components, not {}.'.format(self.shape[-3]))
+            raise ValueError(
+                "The displacement field must have exactly 2 "
+                "components, not {}.".format(self.shape[-3])
+            )
 
     def __repr__(self, *args, **kwargs):
         out = super().__repr__(*args, **kwargs)
-        return out.replace('tensor', 'field', 1).replace('\n ', '\n')
+        return out.replace("tensor", "field", 1).replace("\n ", "\n")
 
     # Conversion to and from torch.Tensor
 
@@ -61,20 +66,26 @@ class DisplacementField(torch.Tensor):
         allowed_types = DisplacementField.__bases__
         if not isinstance(self, allowed_types):
             raise TypeError(
-                "'{}' cannot be converted to '{}'. Valid options are: {}"
-                .format(type(self).__name__, DisplacementField.__name__,
-                        [base.__module__ + "." + base.__name__
-                         for base in allowed_types]))
+                "'{}' cannot be converted to '{}'. Valid options are: {}".format(
+                    type(self).__name__,
+                    DisplacementField.__name__,
+                    [base.__module__ + "." + base.__name__ for base in allowed_types],
+                )
+            )
         if len(self.shape) < 3:
-            raise ValueError('The displacement field must have a components '
-                             'dimension. Only {} dimensions are present.'
-                             .format(len(self.shape)))
+            raise ValueError(
+                "The displacement field must have a components "
+                "dimension. Only {} dimensions are present.".format(len(self.shape))
+            )
         if self.shape[-3] != 2:
-            raise ValueError('The displacement field must have exactly 2 '
-                             'components, not {}.'.format(self.shape[-3]))
+            raise ValueError(
+                "The displacement field must have exactly 2 "
+                "components, not {}.".format(self.shape[-3])
+            )
         self.__class__ = DisplacementField
         self.__init__(*args, **kwargs)  # in case future __init__ is nonempty
         return self
+
     torch.Tensor.field_ = field_  # adds conversion to torch.Tensor superclass
     _from_superclass = field_  # for use in `return_subclass_type()`
 
@@ -84,8 +95,8 @@ class DisplacementField(torch.Tensor):
         if isinstance(data, torch.Tensor):
             return DisplacementField.field_(data.clone(), *args, **kwargs)
         else:
-            return DisplacementField.field_(
-                torch.tensor(data, *args, **kwargs).float())
+            return DisplacementField.field_(torch.tensor(data, *args, **kwargs).float())
+
     torch.Tensor.field = field  # adds conversion to torch.Tensor superclass
     torch.field = field
 
@@ -116,13 +127,14 @@ class DisplacementField(torch.Tensor):
         """
         if len(args) > 0 and isinstance(args[0], torch.Tensor):
             tensor_like, *args = args
-            if 'device' not in kwargs or kwargs['device'] is None:
-                kwargs['device'] = tensor_like.device
-            if 'size' not in kwargs or kwargs['size'] is None:
-                kwargs['size'] = tensor_like.shape
-            if 'dtype' not in kwargs or kwargs['dtype'] is None:
-                kwargs['dtype'] = tensor_like.dtype
+            if "device" not in kwargs or kwargs["device"] is None:
+                kwargs["device"] = tensor_like.device
+            if "size" not in kwargs or kwargs["size"] is None:
+                kwargs["size"] = tensor_like.shape
+            if "dtype" not in kwargs or kwargs["dtype"] is None:
+                kwargs["dtype"] = tensor_like.dtype
         return torch.zeros(*args, **kwargs).field_()
+
     zeros_like = zeros = identity
 
     def ones(*args, **kwargs):
@@ -136,13 +148,14 @@ class DisplacementField(torch.Tensor):
         """
         if len(args) > 0 and isinstance(args[0], torch.Tensor):
             tensor_like, *args = args
-            if 'device' not in kwargs or kwargs['device'] is None:
-                kwargs['device'] = tensor_like.device
-            if 'size' not in kwargs or kwargs['size'] is None:
-                kwargs['size'] = tensor_like.shape
-            if 'dtype' not in kwargs or kwargs['dtype'] is None:
-                kwargs['dtype'] = tensor_like.dtype
+            if "device" not in kwargs or kwargs["device"] is None:
+                kwargs["device"] = tensor_like.device
+            if "size" not in kwargs or kwargs["size"] is None:
+                kwargs["size"] = tensor_like.shape
+            if "dtype" not in kwargs or kwargs["dtype"] is None:
+                kwargs["dtype"] = tensor_like.dtype
         return torch.ones(*args, **kwargs).field_()
+
     ones_like = ones
 
     def rand(*args, **kwargs):
@@ -153,13 +166,14 @@ class DisplacementField(torch.Tensor):
         """
         if len(args) > 0 and isinstance(args[0], torch.Tensor):
             tensor_like, *args = args
-            if 'device' not in kwargs or kwargs['device'] is None:
-                kwargs['device'] = tensor_like.device
-            if 'size' not in kwargs or kwargs['size'] is None:
-                kwargs['size'] = tensor_like.shape
-            if 'dtype' not in kwargs or kwargs['dtype'] is None:
-                kwargs['dtype'] = tensor_like.dtype
+            if "device" not in kwargs or kwargs["device"] is None:
+                kwargs["device"] = tensor_like.device
+            if "size" not in kwargs or kwargs["size"] is None:
+                kwargs["size"] = tensor_like.shape
+            if "dtype" not in kwargs or kwargs["dtype"] is None:
+                kwargs["dtype"] = tensor_like.dtype
         return torch.rand(*args, **kwargs).field_()
+
     rand_like = rand
 
     @torch.no_grad()
@@ -178,10 +192,10 @@ class DisplacementField(torch.Tensor):
         field = rand_tensor * 2 - 1  # rescale to [-1, 1)
         field = field - field.identity_mapping()
         return field.requires_grad_(rand_tensor.requires_grad)
+
     rand_in_bounds_like = rand_in_bounds
 
-    def _get_parameters(tensor, shape=None, device=None, dtype=None,
-                        override=False):
+    def _get_parameters(tensor, shape=None, device=None, dtype=None, override=False):
         """Auxiliary function to deduce the right set of parameters to a tensor
         function.
         In particular, if `tensor` is a `torch.Tensor`, it uses those values.
@@ -192,23 +206,23 @@ class DisplacementField(torch.Tensor):
         """
         if isinstance(tensor, torch.Tensor):
             shape = shape if override and (shape is not None) else tensor.shape
-            device = (device if override and (device is not None)
-                      else tensor.device)
+            device = device if override and (device is not None) else tensor.device
             dtype = dtype if override and (dtype is not None) else tensor.dtype
         else:
             if device is None:
                 try:
                     device = torch.cuda.current_device()
                 except AssertionError:
-                    device = 'cpu'
+                    device = "cpu"
             if dtype is None:
                 dtype = torch.float
         if isinstance(shape, tuple):
             batch_dim = shape[0] if len(shape) > 3 else 1
             if len(shape) < 2:
-                raise ValueError("The shape must have at least two spatial "
-                                 "dimensions. Recieved shape {}."
-                                 .format(shape))
+                raise ValueError(
+                    "The shape must have at least two spatial "
+                    "dimensions. Recieved shape {}.".format(shape)
+                )
             while len(shape) < 4:
                 shape = (1,) + shape
         else:
@@ -216,25 +230,30 @@ class DisplacementField(torch.Tensor):
                 shape = torch.Size((1, 2, shape, shape))
                 batch_dim = 1
             except TypeError:
-                raise TypeError("'shape' must be an 'int', 'tuple', or "
-                                "'torch.Size'. Received '{}'"
-                                .format(type(shape).__qualname__))
+                raise TypeError(
+                    "'shape' must be an 'int', 'tuple', or "
+                    "'torch.Size'. Received '{}'".format(type(shape).__qualname__)
+                )
         device = torch.device(device)
         if dtype == torch.double:
-            tensor_type = (torch.DoubleTensor if device.type == 'cpu'
-                           else torch.cuda.DoubleTensor)
+            tensor_type = (
+                torch.DoubleTensor if device.type == "cpu" else torch.cuda.DoubleTensor
+            )
         elif dtype == torch.float:
-            tensor_type = (torch.FloatTensor if device.type == 'cpu'
-                           else torch.cuda.FloatTensor)
+            tensor_type = (
+                torch.FloatTensor if device.type == "cpu" else torch.cuda.FloatTensor
+            )
         else:
-            raise ValueError("The data type must be either torch.float or "
-                             "torch.double. Recieved {}.".format(dtype))
+            raise ValueError(
+                "The data type must be either torch.float or "
+                "torch.double. Recieved {}.".format(dtype)
+            )
         return {
-            'shape': shape,
-            'batch_dim': batch_dim,
-            'device': device,
-            'dtype': dtype,
-            'tensor_type': tensor_type
+            "shape": shape,
+            "batch_dim": batch_dim,
+            "device": device,
+            "dtype": dtype,
+            "tensor_type": tensor_type,
         }
 
     @torch.no_grad()
@@ -270,16 +289,16 @@ class DisplacementField(torch.Tensor):
         """
         # find the right set of parameters
         params = DisplacementField._get_parameters(size, size, device, dtype)
-        orig_shape, batch_dim, device, tensor_type = \
-            [params[key] for key in ('shape', 'batch_dim',
-                                     'device', 'tensor_type')]
-        id_theta = tensor_type([[[1., 0., 0.], [0., 1., 0.]]], device=device)
+        orig_shape, batch_dim, device, tensor_type = [
+            params[key] for key in ("shape", "batch_dim", "device", "tensor_type")
+        ]
+        id_theta = tensor_type([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], device=device)
         id_theta = id_theta.expand(batch_dim, *id_theta.shape[1:])
         Id = F.affine_grid(id_theta, orig_shape, align_corners=False)
         return Id.permute(0, 3, 1, 2).field_()  # move the components to 2nd position
 
     @classmethod
-    def affine_field(cls, aff, size, offset=(0., 0.), device=None, dtype=None):
+    def affine_field(cls, aff, size, offset=(0.0, 0.0), device=None, dtype=None):
         """Returns a displacement field for an affine transform within a bbox
 
         Args:
@@ -305,11 +324,13 @@ class DisplacementField(torch.Tensor):
             define the location in the source image that contribute to a pixel
             in the destination image.
         """
-        params = DisplacementField._get_parameters(aff, size, device, dtype,
-                                                   override=True)
-        device, dtype, tensor_type, size, batch_dim = \
-            [params[key] for key in ('device', 'dtype', 'tensor_type',
-                                     'shape', 'batch_dim')]
+        params = DisplacementField._get_parameters(
+            aff, size, device, dtype, override=True
+        )
+        device, dtype, tensor_type, size, batch_dim = [
+            params[key]
+            for key in ("device", "dtype", "tensor_type", "shape", "batch_dim")
+        ]
         if isinstance(aff, list):
             aff = tensor_type(aff, device=device)
         if aff.ndimension() == 2:
@@ -318,22 +339,26 @@ class DisplacementField(torch.Tensor):
         elif aff.ndimension() == 3:
             N = aff.shape[0]
         else:
-            raise ValueError("Expected 2 or 3-dimensional affine matrix. "
-                             "Received shape {}.".format(aff.shape))
+            raise ValueError(
+                "Expected 2 or 3-dimensional affine matrix. "
+                "Received shape {}.".format(aff.shape)
+            )
         if N == 1 and batch_dim > 1:
             aff = aff.expand(batch_dim, *aff.shape[1:])
             N = batch_dim
         if offset[0] != 0 or offset[1] != 0:
-            z = tensor_type([[0., 0., 1.]], device=device)
+            z = tensor_type([[0.0, 0.0, 1.0]], device=device)
             z = z.expand(N, *z.shape)
             A = torch.cat([aff, z], 1)
-            B = tensor_type([[1., 0., offset[0]],
-                             [0., 1., offset[1]],
-                             [0., 0., 1.]], device=device)
+            B = tensor_type(
+                [[1.0, 0.0, offset[0]], [0.0, 1.0, offset[1]], [0.0, 0.0, 1.0]],
+                device=device,
+            )
             B = B.expand(N, *B.shape)
-            Bi = tensor_type([[1., 0., -offset[0]],
-                              [0., 1., -offset[1]],
-                              [0., 0., 1.]], device=device)
+            Bi = tensor_type(
+                [[1.0, 0.0, -offset[0]], [0.0, 1.0, -offset[1]], [0.0, 0.0, 1.0]],
+                device=device,
+            )
             Bi = Bi.expand(N, *Bi.shape)
             aff = torch.mm(Bi, torch.mm(A, B))[:, :2]
         M = F.affine_grid(aff, size, align_corners=False)
@@ -379,7 +404,7 @@ class DisplacementField(torch.Tensor):
         since `df.is_identity()` is equivalent to `not df`.
         """
         if eps is None and magn_eps is None:
-            return (self == 0.).all()
+            return (self == 0.0).all()
         else:
             is_id = True
             if eps is not None:
@@ -390,6 +415,7 @@ class DisplacementField(torch.Tensor):
 
     def __bool__(self):
         return not self.is_identity().tensor_()
+
     __nonzero__ = __bool__
 
     def magnitude(self, keepdim=False):
@@ -476,7 +502,7 @@ class DisplacementField(torch.Tensor):
             `(N, 2, 1, 1)` if `keepdim` is `True`, containing the mean nonzero
             vector of each field
         """
-        mask = (self.magnitude(keepdim=True) > 0)
+        mask = self.magnitude(keepdim=True) > 0
         if keepdim:
             sum = self.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
             count = mask.sum(-1, keepdim=keepdim).sum(-2, keepdim=keepdim)
@@ -498,8 +524,7 @@ class DisplacementField(torch.Tensor):
             vector of each field
         """
         if keepdim:
-            return (self.min(-1, keepdim=keepdim).values
-                        .min(-2, keepdim=keepdim).values)
+            return self.min(-1, keepdim=keepdim).values.min(-2, keepdim=keepdim).values
         else:
             return self.min(-1).values.min(-1).values
 
@@ -516,8 +541,7 @@ class DisplacementField(torch.Tensor):
             vector of each field
         """
         if keepdim:
-            return (self.max(-1, keepdim=keepdim).values
-                        .max(-2, keepdim=keepdim).values)
+            return self.max(-1, keepdim=keepdim).values.max(-2, keepdim=keepdim).values
         else:
             return self.max(-1).values.max(-1).values
 
@@ -630,7 +654,7 @@ class DisplacementField(torch.Tensor):
             size = self.shape
         if isinstance(size, tuple):
             size = size[-1]
-        return self.mapping().pixels(size) + (size - 1)/2
+        return self.mapping().pixels(size) + (size - 1) / 2
 
     def from_pixel_mapping(self, size=None):
         """Convert a mapping to a displacement field which contains the
@@ -652,7 +676,7 @@ class DisplacementField(torch.Tensor):
             size = self.shape
         if isinstance(size, tuple):
             size = size[-1]
-        return (self - (size - 1)/2).from_pixels(size).from_mapping()
+        return (self - (size - 1) / 2).from_pixels(size).from_mapping()
 
     # Aliases for the components of the displacent vectors
 
@@ -665,6 +689,7 @@ class DisplacementField(torch.Tensor):
     @x.setter
     def x(self, value):
         self[..., 0:1, :, :] = value
+
     j = x  # j & x are both aliases for the column component of the displacent
 
     @property
@@ -676,12 +701,13 @@ class DisplacementField(torch.Tensor):
     @y.setter
     def y(self, value):
         self[..., 1:2, :, :] = value
+
     i = y  # i & y are both aliases for the row component of the displacent
 
     # Functions for sampling, composing, mapping, warping
 
     @ensure_dimensions(ndimensions=4, arg_indices=(1, 0), reverse=True)
-    def sample(self, input, mode='bilinear', padding_mode='zeros'):
+    def sample(self, input, mode="bilinear", padding_mode="zeros"):
         r"""A wrapper for the PyTorch grid sampler to sample or warp and image
         by a displacent field.
 
@@ -722,13 +748,14 @@ class DisplacementField(torch.Tensor):
         """
         field = self + self.identity_mapping()
         field = field.permute(0, 2, 3, 1)  # move components to last position
-        out = F.grid_sample(input, field, mode=mode,
-                            padding_mode=padding_mode, align_corners=False)
+        out = F.grid_sample(
+            input, field, mode=mode, padding_mode=padding_mode, align_corners=False
+        )
         if not isinstance(input, DisplacementField):
             out.tensor_()
         return out
 
-    def compose_with(self, other, mode='bilinear'):
+    def compose_with(self, other, mode="bilinear"):
         r"""Compose this displacement field with another displacement field.
         If `f = self` and `g = other`, then this computes
         `f⚬g` such that `(f⚬g)(x) ~= f(g(x))` for any tensor `x`.
@@ -742,9 +769,9 @@ class DisplacementField(torch.Tensor):
         sampling twice, information is inevitably lost in the intermediate
         stage. Sampling with the composed field is therefore more precise.
         """
-        return self + self.sample(other, padding_mode='border')
+        return self + self.sample(other, padding_mode="border")
 
-    def __call__(self, x, mode='bilinear'):
+    def __call__(self, x, mode="bilinear"):
         """Syntactic sugar for `compose_with()` or `sample()`, depending on
         the type of the sampled tensor.
 
@@ -783,11 +810,12 @@ class DisplacementField(torch.Tensor):
         in other words, one mip level.
         """
         if mips is not None:
-            scale_factor = 2**mips
+            scale_factor = 2 ** mips
         if scale_factor == 1:
             return self
-        return F.interpolate(self, scale_factor=scale_factor,
-                             mode='bilinear', align_corners=False)
+        return F.interpolate(
+            self, scale_factor=scale_factor, mode="bilinear", align_corners=False
+        )
 
     @ensure_dimensions(ndimensions=4, arg_indices=(0), reverse=True)
     def down(self, mips=None, scale_factor=2):
@@ -797,11 +825,12 @@ class DisplacementField(torch.Tensor):
         in other words, one mip level.
         """
         if mips is not None:
-            scale_factor = 2**mips
+            scale_factor = 2 ** mips
         if scale_factor == 1:
             return self
-        return F.interpolate(self, scale_factor=1./scale_factor,
-                             mode='bilinear', align_corners=False)
+        return F.interpolate(
+            self, scale_factor=1.0 / scale_factor, mode="bilinear", align_corners=False
+        )
 
     # Displacement Field Inverses
 
@@ -907,11 +936,32 @@ class DisplacementField(torch.Tensor):
         return voting.vote(self, softmin_temp, blur_sigma, subset_size)
 
     @wraps(voting.vote)
-    def get_vote_weights_with_variances(self, var, softmin_temp=1, blur_sigma=1, 
-                                        subset_size=None):
-        return voting.get_vote_weights_with_variances(self, var, softmin_temp, blur_sigma, 
-                                                      subset_size)
+    def get_vote_weights_with_variances(
+        self, var, softmin_temp=1, blur_sigma=1, subset_size=None
+    ):
+        return voting.get_vote_weights_with_variances(
+            self, var, softmin_temp, blur_sigma, subset_size
+        )
 
     @wraps(voting.vote)
     def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=None):
-        return voting.vote_with_variances(self, var, softmin_temp, blur_sigma, subset_size)
+        return voting.vote_with_variances(
+            self, var, softmin_temp, blur_sigma, subset_size
+        )
+
+    @wraps(voting.vote)
+    def get_vote_weights_with_distances(
+        self, distances, softmin_temp=1, blur_sigma=1, subset_size=None
+    ):
+        return voting.get_vote_weights_with_distances(
+            self, distances, softmin_temp, blur_sigma, subset_size
+        )
+
+    @wraps(voting.vote)
+    def vote_with_distances(
+        self, distances, softmin_temp=1, blur_sigma=1, subset_size=None
+    ):
+        return voting.vote_with_distances(
+            self, distances, softmin_temp, blur_sigma, subset_size
+        )
+
