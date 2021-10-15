@@ -1,5 +1,6 @@
 """PyTorch tensor type for working with displacement vector fields
 """
+from typing import Any
 import torch
 import torch.nn.functional as F
 from functools import wraps
@@ -46,6 +47,20 @@ class DisplacementField(torch.Tensor):
     def __repr__(self, *args, **kwargs):
         out = super().__repr__(*args, **kwargs)
         return out.replace('tensor', 'field', 1).replace('\n ', '\n')
+
+    _cache_identities = False
+    _identities = {}
+
+    @classmethod
+    def _set_identity_mapping_cache(cls, mode: bool, clear_cache: bool = False) -> None:
+        cls._cache_identities = mode
+        if clear_cache:
+            cls._identities = {}
+
+    @classmethod
+    def is_identity_mapping_cache_enabled(cls) -> bool:
+        """``True`` if identity_mapping() calls are currently cached, ``else False``."""
+        return cls._cache_identities
 
     # Conversion to and from torch.Tensor
 
@@ -267,16 +282,34 @@ class DisplacementField(torch.Tensor):
 
             df = DisplacementField(1,1,10,10)
             ident = df.identity_mapping()  # uses df.shape and df.device
+
+        NOTE: If `use_identity_mapping_cache` is enabled, the returned field will
+              be a reference to the field in cache. Use `clone()` on the returned
+              field if you plan to perform inplace modifications and do not want
+              to alter the cached version.
         """
         # find the right set of parameters
         params = DisplacementField._get_parameters(size, size, device, dtype)
-        orig_shape, batch_dim, device, tensor_type = \
-            [params[key] for key in ('shape', 'batch_dim',
-                                     'device', 'tensor_type')]
-        id_theta = tensor_type([[[1., 0., 0.], [0., 1., 0.]]], device=device)
-        id_theta = id_theta.expand(batch_dim, *id_theta.shape[1:])
-        Id = F.affine_grid(id_theta, orig_shape, align_corners=False)
-        return Id.permute(0, 3, 1, 2).field_()  # move the components to 2nd position
+        shape, batch_dim, device, tensor_type = [
+            params[key] for key in ("shape", "batch_dim", "device", "tensor_type")
+        ]
+
+        # look in the cache and create from scratch if not there
+        if (
+            DisplacementField._cache_identities == True
+            and (shape, device, tensor_type) in DisplacementField._identities
+        ):
+            Id = DisplacementField._identities[shape, device, tensor_type]
+        else:
+            id_theta = tensor_type([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], device=device)
+            id_theta = id_theta.expand(batch_dim, *id_theta.shape[1:])
+            Id = F.affine_grid(id_theta, shape, align_corners=False)
+            Id = Id.permute(0, 3, 1, 2).field_()  # move the components to 2nd position
+
+            if DisplacementField._cache_identities == True:
+                DisplacementField._identities[shape, device, tensor_type] = Id
+
+        return Id
 
     @classmethod
     def affine_field(cls, aff, size, offset=(0., 0.), device=None, dtype=None):
@@ -889,3 +922,39 @@ class DisplacementField(torch.Tensor):
     @wraps(voting.vote)
     def vote(self, softmin_temp=1, blur_sigma=1):
         return voting.vote(self, softmin_temp, blur_sigma)
+
+class set_identity_mapping_cache():
+    """Context-manager that controls caching of identity_mapping() results.
+
+    ``set_identity_mapping_cache`` will enable or disable the cache (:attr: `mode`).
+    It can be used as a context-manager or as a function.
+
+    If enabled, cache results of identity_mapping() calls based on
+    (shape, device, dtype) for faster recall.
+
+    This may also improve repeated calls to other torchfields methods,
+    such as `sample()`, `rand_in_bounds()`, `pixel_mapping()`, etc.
+
+    The trade-off is a higher burden on CPU/GPU memory, therefore
+    caching is disabled by default.
+
+    Args:
+      mode (bool): Flag whether to enable cache (``True``), or disable (``False``).
+      clear_cache (bool): Optional flag whether or not to empty any existing
+        cached results. Default is ``False``.
+
+    Note: For performance reasons, the returned field from identity_mapping()
+      will be the cached, *mutable* field. Use `clone()` on the returned field
+      if you plan to perform in-place modifications and do not want to alter the
+      cached version.
+    """
+
+    def __init__(self, mode: bool, clear_cache: bool = False) -> None:
+        self.prev = DisplacementField.is_identity_mapping_cache_enabled()
+        DisplacementField._set_identity_mapping_cache(mode, clear_cache)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        DisplacementField._set_identity_mapping_cache(self.prev)
