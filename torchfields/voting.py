@@ -7,27 +7,38 @@ import torch.nn.functional as F
 ############################
 
 
-def gaussian_blur(self, sigma=1, kernel_size=5):
-    """Gausssian blur the displacement field to reduce any unsmoothness
-    Adapted from https://bit.ly/2JO7CCP
-    """
-    import math
-
-    if sigma == 0:
-        return self.clone()
+def get_padding(kernel_size):
     pad = (kernel_size - 1) // 2
     if kernel_size % 2 == 0:
         pad = (pad, pad + 1, pad, pad + 1)
     else:
         pad = (pad,) * 4
-    padded = F.pad(self, pad, mode="reflect")
+    return pad
+
+
+def gaussian_blur(data, sigma=1, kernel_size=5):
+    """Gausssian blur the displacement field to reduce any unsmoothness
+    Adapted from https://bit.ly/2JO7CCP
+
+    Args:
+        data (tensor): NxCxWxH
+    """
+    import math
+
+    if sigma == 0:
+        return data.clone()
+    pad = get_padding(kernel_size)
+    padded = F.pad(data, pad, mode="reflect")
     mu = (kernel_size - 1) / 2
-    x = torch.stack(torch.meshgrid([torch.arange(kernel_size).to(self)] * 2))
+    x = torch.stack(torch.meshgrid([torch.arange(kernel_size).to(data)] * 2))
     kernel = torch.exp((-(((x - mu) / sigma) ** 2)) / 2)
     kernel = kernel.prod(dim=0) / (2 * math.pi * sigma ** 2)
     kernel = kernel / kernel.sum()  # renormalize to get unit product
     kernel = kernel.expand(2, 1, *kernel.shape)
-    return F.conv2d(padded, weight=kernel, groups=2)
+    groups = 2
+    if data.shape[1] == 1:
+        groups = 1
+    return F.conv2d(padded, weight=kernel, groups=groups)
 
 
 def get_vote_shape(self):
@@ -175,7 +186,7 @@ def get_vote_weights_with_distances(
         subset_size (int): number of members to each set for comparison
 
     Returns:
-        per field weight (torch.Tensor): (N, 1, H, W)
+        per field weight (torch.Tensor): (N, H, W)
     """
     from itertools import combinations
 
@@ -276,7 +287,7 @@ def get_vote_weights_with_variances(
         subset_size (int): number of members to each set for comparison
 
     Returns:
-        per field weight (torch.Tensor): (N, 1, H, W)
+        per field weight (torch.Tensor): (N, H, W)
     """
     from itertools import combinations
 
@@ -354,3 +365,105 @@ def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=Non
         subset_size=subset_size,
     )
     return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+
+
+def get_priority_vote_weights(
+    self, priorities, consensus_threshold=2, subset_size=None
+):
+    """Calculate weights to produce near-median vector with highest priority.
+    This method differs from other voting approaches by favoring a single
+    vector as much as possible, rather than averaging over any subset.
+
+    Args:
+        self: DisplacementField of shape (N, 2, H, W)
+        priorities: Tensor of shape (N, H, W). Larger means higher priority.
+        consensus_threshold (float): maximum distance from lowest score that will
+            consider subset part of consensus
+        subset_size (int): number of members to each set for comparison
+
+    Returns:
+        per field weight (torch.Tensor): (N, H, W)
+    """
+    from itertools import combinations
+
+    if self.ndimension() != 4:
+        raise ValueError(
+            "Vector vote is only implemented on "
+            "displacement fields with 4 dimensions. "
+            "The input has {}.".format(self.ndimension())
+        )
+    n, shape = self.get_vote_shape()
+    subset_size = self.get_subset_size(subset_size=subset_size)
+    if subset_size == 1:
+        return (priorities == torch.max(priorities, dim=0, keepdim=True)[0]).float()
+
+    # mtuple: majority tuples
+    mtuples = self.get_vote_subsets(subset_size=subset_size)
+
+    # compute distances for all pairs of fields
+    dists = torch.zeros((n, n, *shape)).to(device=self.device)
+    for i in range(n):
+        for j in range(i):
+            dists[i, j] = dists[j, i] = self[i].distance(self[j])
+
+    # compute mean distance for all majority tuples
+    mtuple_avg = []
+    mtuple_priority = []
+    for mtuple in mtuples:
+        delta = torch.stack([dists[i, j] for i, j in combinations(mtuple, 2)]).mean(
+            dim=0
+        )
+        mtuple_avg.append(delta)
+        mtuple_priorities = torch.stack([priorities[i] for i in mtuple])
+        mtuple_priority.append(torch.max(mtuple_priorities, dim=0)[0])
+    mavg = torch.stack(mtuple_avg)
+    # best priority for each mtuple
+    mpriority = torch.stack(mtuple_priority)
+
+    # identify vectors that participate in consensus, find their priority
+    relative_score = mavg - torch.min(mavg, dim=0)[0]
+    consensus_indicator = relative_score < consensus_threshold
+    consensus_priorities = torch.where(
+        consensus_indicator, mpriority, torch.zeros_like(mpriority)
+    )
+    consensus_priority = torch.max(consensus_priorities, dim=0, keepdim=True)[0]
+    weights = (priorities == consensus_priority).float()
+    return weights / weights.sum(dim=0)
+
+
+def priority_vote(
+    self,
+    priorities,
+    consensus_threshold=2,
+    blur_sigma=2,
+    kernel_size=5,
+    subset_size=None,
+):
+    """Produce a single, consensus displacement field from a batch of
+    distributions, with displacement fields as mean and variances.
+
+    Args:
+        self: DisplacementField of shape (N, 2, H, W)
+        priorities: Tensor of shape (N, 1, H, W). Larger means higher priority.
+        consensus_threshold (float): maximum distance from lowest score that will
+            consider subset part of consensus
+        blur_sigma (float): std dev of the Gaussian kernel by which to blur
+            the weight outputs. None or 0 means no blurring.
+        subset_size (int): number of members to each subset
+
+    Returns:
+        DisplacementField of shape (1, 2, H, W) containing the vector
+        vote result
+    """
+    field_weights = self.get_priority_vote_weights(
+        priorities=priorities,
+        consensus_threshold=consensus_threshold,
+        subset_size=subset_size,
+    )
+    field_weights = field_weights.unsqueeze(-3)
+    _, shape = self.get_vote_shape()
+    # need to be plurred with reflected padding
+    max_pad = max(get_padding(kernel_size))
+    if (shape[-1] > max_pad) and (shape[-2] > max_pad):
+        field_weights = gaussian_blur(data=field_weights, sigma=blur_sigma)
+    return (self * field_weights).sum(dim=0, keepdim=True)
