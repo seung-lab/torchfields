@@ -940,14 +940,18 @@ class DisplacementField(torch.Tensor):
         return voting.vote(self, softmin_temp, blur_sigma, subset_size)
 
     @wraps(voting.vote)
-    def get_vote_weights_with_variances(self, var, softmin_temp=1, blur_sigma=1, 
-                                        subset_size=None):
-        return voting.get_vote_weights_with_variances(self, var, softmin_temp, blur_sigma, 
-                                                      subset_size)
+    def get_vote_weights_with_variances(
+        self, var, softmin_temp=1, blur_sigma=1, subset_size=None
+    ):
+        return voting.get_vote_weights_with_variances(
+            self, var, softmin_temp, blur_sigma, subset_size
+        )
 
     @wraps(voting.vote)
     def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=None):
-        return voting.vote_with_variances(self, var, softmin_temp, blur_sigma, subset_size)
+        return voting.vote_with_variances(
+            self, var, softmin_temp, blur_sigma, subset_size
+        )
 
 
 class set_identity_mapping_cache():
