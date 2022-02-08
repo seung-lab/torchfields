@@ -998,6 +998,28 @@ class DisplacementField(torch.Tensor):
             self, distances, softmin_temp, blur_sigma, subset_size
         )
 
+    @wraps(voting.vote)
+    def get_priority_vote_weights(
+        self, priorities, consensus_threshold=2, subset_size=None
+    ):
+        return voting.get_priority_vote_weights(
+            self,
+            priorities,
+            consensus_threshold=consensus_threshold,
+            subset_size=subset_size,
+        )
+
+    @wraps(voting.vote)
+    def priority_vote(
+        self, priorities, consensus_threshold=2, blur_sigma=1, subset_size=None
+    ):
+        return voting.priority_vote(
+            self,
+            priorities,
+            consensus_threshold=consensus_threshold,
+            blur_sigma=blur_sigma,
+            subset_size=subset_size,
+        )
 
 class set_identity_mapping_cache():
     """Context-manager that controls caching of identity_mapping() results.
