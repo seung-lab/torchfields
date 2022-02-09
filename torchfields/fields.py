@@ -961,6 +961,17 @@ class DisplacementField(torch.Tensor):
         return voting.get_vote_subsets(self, subset_size)
 
     @wraps(voting.vote)
+    def linear_combination(self, weights):
+        return voting.linear_combination(self, weights=weights)
+
+    @wraps(voting.vote)
+    def smoothed_combination(self, weights, blur_sigma=2., kernel_size=5):
+        return voting.smoothed_combination(self, 
+                                           weights=weights, 
+                                           blur_sigma=blur_sigma, 
+                                           kernel_size=kernel_size)
+
+    @wraps(voting.vote)
     def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
         return voting.get_vote_weights(self, softmin_temp, blur_sigma, subset_size)
 
