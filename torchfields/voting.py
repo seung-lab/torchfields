@@ -100,7 +100,7 @@ def smoothed_combination(self, weights, blur_sigma=2., kernel_size=5):
     # need to blur with reflected padding, which requires minimums for dimensions
     max_pad = max(get_padding(kernel_size))
     if (shape[-1] > max_pad) and (shape[-2] > max_pad):
-        weights = gaussian_blur(data=weights, sigma=blur_sigma)
+        weights = gaussian_blur(data=weights, sigma=blur_sigma, kernel_size=kernel_size)
     return self.linear_combination(weights)
 
 
