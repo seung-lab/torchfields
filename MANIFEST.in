@@ -1,0 +1,4 @@
+exclude AUTHORS
+exclude ChangeLog
+exclude MANIFEST.in
+recursive-exclude *.egg-info/**

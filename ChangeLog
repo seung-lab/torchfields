@@ -1,0 +1,64 @@
+CHANGES
+=======
+
+v0.1.0
+------
+
+* Add priority\_vote
+* Add vote\_with\_distances
+* Add voting\_with\_variances to include prior weights
+
+v0.0.6
+------
+
+* feat(use\_identity\_mapping\_cache): allow caching identity\_mapping() results
+* fix: 0.7.0 compatibility (#8)
+* Update license in setup.cfg
+
+v0.0.5
+------
+
+* Update documentation for sample()
+* Allow non-square displacement fields
+* Clean up identity mapping code
+* Remove caching of identity mappings
+* Use align\_corners=False from PyTorch 1.3.0 Will no longer work with earlier PyTorch versions
+* Convert to using MIT License
+
+v0.0.4
+------
+
+* Prevent producing NaN in inverse backward pass
+* Allow accessing field type as torchfields.Field
+* Ensure contiguous gradients in inversion backward pass
+* Allow padding to be explicitly given in \_pad()
+* Bump required pytorch version to 1.1.0
+* Factor out voting, inversion, and util functions
+* Update README.md
+* Update README.md
+
+v0.0.3
+------
+
+* Change ndim to ndimension() to support wider range of PyTorch versions
+
+v0.0.2
+------
+
+* [Fix] affine\_field incorrect dimensions bug
+
+v0.0.1
+------
+
+* [Fix] inverse not working on cpu
+* Add setup.py, setup.cfg, README.md, .gitignore, and requirements.txt
+* DisplacementField: minor bug fixes, refactors, and comments
+* Safe division to avoid NaNs during backward pass
+* Use winding number to test inclusion rather than bounding i,j
+* Epsilon for comparison to zero
+* Autopad functionality in left inverse
+* More efficient left inverse using sparse tensors
+* Mean finite vector function
+* Inefficient implementation of left inverse
+* Add DisplacementField class to abstract displacement field operations
+* Initial commit

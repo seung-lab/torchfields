@@ -5,9 +5,9 @@ with open("README.md", "r") as fh:
 
 setup(
     name='torchfields',
-    version='0.0.2',
-    author='Barak Nehoran',
-    author_email='bnehoran@users.noreply.github.com',
+    version='0.1.0',
+    author='Barak Nehoran, Nico Kemnitz',
+    author_email='bnehoran@users.noreply.github.com, nkemnitz@users.noreply.github.com',
     description='A PyTorch add-on for working with image mappings and displacement fields, including Spatial Transformers',
     long_description=long_description,
     long_description_content_type="text/markdown",
