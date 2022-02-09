@@ -69,6 +69,41 @@ def get_vote_subsets(self, subset_size=None):
     return subset_tuples
 
 
+def linear_combination(self, weights):
+    """Create a single field from a set of fields given a set of weights
+
+    Args:
+        weights (tensor): (N, 1, W, H) or (N, W, H)
+
+    Returns:
+        DisplacementField with shape (1, 2, W, H)
+    """
+    if len(weights.shape) == 3:
+        weights = weights.unsqueeze(-3)
+    return (self * weights).sum(dim=0, keepdim=True)
+
+
+def smoothed_combination(self, weights, blur_sigma=2., kernel_size=5):
+    """Create a single field from a set of fields, given a set of weights.
+    The weights will be spaitally smooth with a Gaussian kernel of std blur_sigma.
+
+    Args:
+        weights (tensor): (N, W, H)
+        blur_sigma (float)
+        kernel_size (int)
+
+    Returns:
+        DisplacementField with shape (1, 2, W, H)
+    """
+    weights = weights.unsqueeze(-3)
+    _, shape = self.get_vote_shape()
+    # need to blur with reflected padding, which requires minimums for dimensions
+    max_pad = max(get_padding(kernel_size))
+    if (shape[-1] > max_pad) and (shape[-2] > max_pad):
+        weights = gaussian_blur(data=weights, sigma=blur_sigma)
+    return self.linear_combination(weights)
+
+
 def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
     """Calculate per field weights for batch of displacement fields, indicating 
     which fields should be considered consensus.
@@ -159,10 +194,10 @@ def vote(self, softmin_temp=1, blur_sigma=1, subset_size=None):
         DisplacementField of shape (1, 2, H, W) containing the vector
         vote result
     """
-    field_weights = self.get_vote_weights(
+    weights = self.get_vote_weights(
         softmin_temp=softmin_temp, blur_sigma=blur_sigma, subset_size=subset_size
     )
-    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+    return self.linear_combination(weights=weights)
 
 
 def get_vote_weights_with_distances(
@@ -257,13 +292,13 @@ def vote_with_distances(
         DisplacementField of shape (1, 2, H, W) containing the vector
         vote result
     """
-    field_weights = self.get_vote_weights_with_distances(
+    weights = self.get_vote_weights_with_distances(
         softmin_temp=softmin_temp,
         distances=distances,
         blur_sigma=blur_sigma,
         subset_size=subset_size,
     )
-    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+    return self.linear_combination(weights=weights)
 
 
 def get_vote_weights_with_variances(
@@ -358,13 +393,13 @@ def vote_with_variances(self, var, softmin_temp=1, blur_sigma=1, subset_size=Non
         DisplacementField of shape (1, 2, H, W) containing the vector
         vote result
     """
-    field_weights = self.get_vote_weights_with_variances(
+    weights = self.get_vote_weights_with_variances(
         softmin_temp=softmin_temp,
         var=var,
         blur_sigma=blur_sigma,
         subset_size=subset_size,
     )
-    return (self * field_weights.unsqueeze(-3)).sum(dim=0, keepdim=True)
+    return self.linear_combination(weights=weights)
 
 
 def get_priority_vote_weights(
@@ -455,15 +490,12 @@ def priority_vote(
         DisplacementField of shape (1, 2, H, W) containing the vector
         vote result
     """
-    field_weights = self.get_priority_vote_weights(
+    weights = self.get_priority_vote_weights(
         priorities=priorities,
         consensus_threshold=consensus_threshold,
         subset_size=subset_size,
     )
-    field_weights = field_weights.unsqueeze(-3)
-    _, shape = self.get_vote_shape()
-    # need to be plurred with reflected padding
-    max_pad = max(get_padding(kernel_size))
-    if (shape[-1] > max_pad) and (shape[-2] > max_pad):
-        field_weights = gaussian_blur(data=field_weights, sigma=blur_sigma)
-    return (self * field_weights).sum(dim=0, keepdim=True)
+    return self.smoothed_combination(weights=weights, 
+                                     blur_sigma=blur_sigma, 
+                                     kernel_size=kernel_size)
+
