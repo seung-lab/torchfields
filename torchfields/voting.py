@@ -420,7 +420,6 @@ def get_priority_vote_weights(
         per field weight (torch.Tensor): (N, H, W)
     """
     from itertools import combinations
-
     if self.ndimension() != 4:
         raise ValueError(
             "Vector vote is only implemented on "
@@ -432,6 +431,7 @@ def get_priority_vote_weights(
     if subset_size == 1:
         return (priorities == torch.max(priorities, dim=0, keepdim=True)[0]).float()
 
+    assert consensus_threshold >= 0 
     # mtuple: majority tuples
     mtuples = self.get_vote_subsets(subset_size=subset_size)
 
@@ -457,7 +457,7 @@ def get_priority_vote_weights(
 
     # identify vectors that participate in consensus, find their priority
     relative_score = mavg - torch.min(mavg, dim=0)[0]
-    consensus_indicator = relative_score < consensus_threshold
+    consensus_indicator = relative_score <= consensus_threshold
     consensus_priorities = torch.where(
         consensus_indicator, mpriority, torch.zeros_like(mpriority)
     )
