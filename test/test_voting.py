@@ -150,7 +150,7 @@ def test_priority_vote():
     assert torch.equal(tfw, vfw)
 
     # no negative consensus_threshold
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         vfw = f.get_priority_vote_weights(
             priorities=p, consensus_threshold=-1, subset_size=2
         )

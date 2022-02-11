@@ -417,6 +417,13 @@ def get_priority_vote_weights(
     """
     from itertools import combinations
 
+    if consensus_threshold < 0.0:
+        raise ValueError(
+            "Expected non-negative value for consensus_threshold, but received {}.".format(
+                consensus_threshold
+            )
+        )
+
     if self.ndimension() != 4:
         raise ValueError(
             "Vector vote is only implemented on "

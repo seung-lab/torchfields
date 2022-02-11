@@ -1,6 +1,12 @@
 CHANGES
 =======
 
+v0.1.1
+------
+
+* Priority Vote: Adjusting kernel size for priority vote operations will now affect blurring
+* Priority Vote: Consensus threshold can be 0
+
 v0.1.0
 ------
 
