@@ -431,7 +431,6 @@ def get_priority_vote_weights(
     if subset_size == 1:
         return (priorities == torch.max(priorities, dim=0, keepdim=True)[0]).float()
 
-    assert consensus_threshold >= 0 
     # mtuple: majority tuples
     mtuples = self.get_vote_subsets(subset_size=subset_size)
 
