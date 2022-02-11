@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-
 ############################
 # Vector vote implemtation
 ############################
@@ -42,15 +41,13 @@ def gaussian_blur(data, sigma=1, kernel_size=5):
 
 
 def get_vote_shape(self):
-    """Consistently split shape into N fields & shape of field
-    """
+    """Consistently split shape into N fields & shape of field"""
     n, _, *shape = self.shape
     return n, shape
 
 
 def get_subset_size(self, subset_size=None):
-    """Compute smallest majority of self is subset_size not set
-    """
+    """Compute smallest majority of self is subset_size not set"""
     n, _ = self.get_vote_shape()
     m = (n + 1) // 2  # smallest number that constututes a majority
     if subset_size is not None:
@@ -59,8 +56,7 @@ def get_subset_size(self, subset_size=None):
 
 
 def get_vote_subsets(self, subset_size=None):
-    """Compute list of majority subsets to use in vote
-    """
+    """Compute list of majority subsets to use in vote"""
     n, _ = self.get_vote_shape()
     m = self.get_subset_size(subset_size=subset_size)
     from itertools import combinations
@@ -83,7 +79,7 @@ def linear_combination(self, weights):
     return (self * weights).sum(dim=0, keepdim=True)
 
 
-def smoothed_combination(self, weights, blur_sigma=2., kernel_size=5):
+def smoothed_combination(self, weights, blur_sigma=2.0, kernel_size=5):
     """Create a single field from a set of fields, given a set of weights.
     The weights will be spaitally smooth with a Gaussian kernel of std blur_sigma.
 
@@ -105,7 +101,7 @@ def smoothed_combination(self, weights, blur_sigma=2., kernel_size=5):
 
 
 def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
-    """Calculate per field weights for batch of displacement fields, indicating 
+    """Calculate per field weights for batch of displacement fields, indicating
     which fields should be considered consensus.
 
     Args:
@@ -205,7 +201,7 @@ def get_vote_weights_with_distances(
 ):
     """Calculate consensus field from batch of displacement fields along with distances.
     Voting proceeds as normal, until it comes time to distribute the weight of each
-    subset amongst its constitute vectors. The distribution is now based on the 
+    subset amongst its constitute vectors. The distribution is now based on the
     distances of each vector, with distances further away making a vector contribute
     less to consensus than nearer distance vectors in the subset.
 
@@ -305,9 +301,9 @@ def get_vote_weights_with_variances(
     self, var, softmin_temp=1, blur_sigma=1, subset_size=None
 ):
     """Calculate consensus field from batch of displacement fields along with variances.
-    Each vector within self is treated as the mean of a distribution with isotropic 
+    Each vector within self is treated as the mean of a distribution with isotropic
     variance for the corresponding location in variances. A subset of vectors is
-    considered a mixture distribution. We assign higher weight to mixture distributions 
+    considered a mixture distribution. We assign higher weight to mixture distributions
     with lower variances.
 
     Weights should be proportional to get_vote_weights if variances are zero.
@@ -420,6 +416,7 @@ def get_priority_vote_weights(
         per field weight (torch.Tensor): (N, H, W)
     """
     from itertools import combinations
+
     if self.ndimension() != 4:
         raise ValueError(
             "Vector vote is only implemented on "
@@ -494,7 +491,6 @@ def priority_vote(
         consensus_threshold=consensus_threshold,
         subset_size=subset_size,
     )
-    return self.smoothed_combination(weights=weights, 
-                                     blur_sigma=blur_sigma, 
-                                     kernel_size=kernel_size)
-
+    return self.smoothed_combination(
+        weights=weights, blur_sigma=blur_sigma, kernel_size=kernel_size
+    )
