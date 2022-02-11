@@ -2,7 +2,6 @@ import pytest
 import torch
 import torchfields
 
-
 # def test_vote_shape():
 #     assert False
 #
@@ -136,6 +135,25 @@ def test_priority_vote():
     p = torch.ones((3, 4, 4))
     vf = f.priority_vote(priorities=p, consensus_threshold=2, subset_size=2)
     assert torch.allclose(f, vf)
+
+    # consensus_threshold=0 should return v2
+    f = torch.zeros((3, 2, 1, 1)).field()
+    f[0] = 1
+    p = torch.full((3, 1, 1), fill_value=3)
+    p[1] = 2
+    p[2] = 1
+    vfw = f.get_priority_vote_weights(
+        priorities=p, consensus_threshold=0, subset_size=2
+    )
+    tfw = torch.zeros((3, 1, 1))
+    tfw[1] = 1
+    assert torch.equal(tfw, vfw)
+
+    # no negative consensus_threshold
+    with pytest.raises(AssertionError):
+        vfw = f.get_priority_vote_weights(
+            priorities=p, consensus_threshold=-1, subset_size=2
+        )
 
 
 def test_gaussian_blur():
