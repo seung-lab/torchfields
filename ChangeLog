@@ -1,6 +1,11 @@
 CHANGES
 =======
 
+v0.1.2
+------
+
+* get_vote_weights_*: use softmax to avoid overflow issues
+
 v0.1.1
 ------
 
