@@ -151,18 +151,14 @@ def get_vote_weights(self, softmin_temp=1, blur_sigma=1, subset_size=None):
     mavg = torch.stack(mtuple_avg)
 
     # compute weights for mtuples: smaller mean distance -> higher weight
-    # computing softmin explicitly for access to numerator & denominator
-    # equivalent to:
-    # (-mavg/softmin_temp).softmax(dim=0) == mt_weights_num / mt_weights_den
-    mt_weights_num = torch.exp(-mavg / softmin_temp)
-    mt_weights_den = mt_weights_num.sum(dim=0, keepdim=True)
+    mt_weights = (-mavg / softmin_temp).softmax(dim=0)
 
-    mt_weights = mt_weights_num / mt_weights_den
     # assign mtuple weights back to individual fields
     field_weights = torch.zeros((n, *shape)).to(device=mt_weights.device)
     for i, mtuple in enumerate(mtuples):
         for j in mtuple:
             field_weights[j] += mt_weights[i]
+
     # rather than use m, prefer sum for sum precision
     elements_per_subset = field_weights.sum(dim=0, keepdim=True)
     field_weights = field_weights / elements_per_subset
@@ -250,13 +246,8 @@ def get_vote_weights_with_distances(
     subset_std_dist = torch.stack(subset_std).pow(2).sum(dim=-3).sqrt()
 
     # compute weights for subset_tuples: smaller variance -> higher weight
-    # computing softmin explicitly for access to numerator & denominator
-    # equivalent to:
-    # subset_weights == (-subset_std_dist/softmin_temp).softmax(dim=0)
-    subset_weights_num = torch.exp(-subset_std_dist / softmin_temp)
-    subset_weights_den = subset_weights_num.sum(dim=0, keepdim=True)
+    subset_weights = (-subset_std_dist / softmin_temp).softmax(dim=0)
 
-    subset_weights = subset_weights_num / subset_weights_den
     # assign subset weights back to individual fields
     # use distances to partition the weights: larger distance -> less weight
     field_weights = torch.zeros((n, *shape)).to(device=subset_weights.device)
@@ -354,18 +345,14 @@ def get_vote_weights_with_variances(
     subset_std_dist = torch.stack(subset_std).pow(2).sum(dim=-3).sqrt()
 
     # compute weights for subset_tuples: smaller variance -> higher weight
-    # computing softmin explicitly for access to numerator & denominator
-    # equivalent to:
-    # subset_weights == (-subset_std_dist/softmin_temp).softmax(dim=0)
-    subset_weights_num = torch.exp(-subset_std_dist / softmin_temp)
-    subset_weights_den = subset_weights_num.sum(dim=0, keepdim=True)
+    subset_weights = (-subset_std_dist / softmin_temp).softmax(dim=0)
 
-    subset_weights = subset_weights_num / subset_weights_den
     # assign subset weights back to individual fields
     field_weights = torch.zeros((n, *shape)).to(device=subset_weights.device)
     for i, subset in enumerate(subset_tuples):
         for j in subset:
             field_weights[j] += subset_weights[i]
+
     # rather than use subset_size, prefer sum for sum precision
     elements_per_subset = field_weights.sum(dim=0, keepdim=True)
     field_weights = field_weights / elements_per_subset
